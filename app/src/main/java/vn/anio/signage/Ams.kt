@@ -39,7 +39,7 @@ object Uuid7 {
     }
 }
 
-/** Client edge-gateway AMS: docs/DEVICE-PROTOCOL.md (ký Ed25519 mọi yêu cầu /v1/*). */
+/** Client edge-gateway AMS: docs/DEVICE-PROTOCOL.md (ký Ed25519 mọi yêu cầu v1). */
 class Gateway(private val ctx: Context, private val prefs: Prefs) {
     private val rnd = SecureRandom()
 
