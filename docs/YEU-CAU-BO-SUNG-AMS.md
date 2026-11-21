@@ -11,7 +11,7 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 2. Ký mọi yêu cầu `/v1/*` (X-Device-Id, X-Timestamp, X-Nonce, X-Signature), tự bù lệch đồng hồ khi gặp `stale_timestamp`.
 3. `POST /v1/heartbeat` theo `next_interval` của server; `GET /v1/manifest?etag=` khi `manifest_etag` đổi, tải creative và kiểm `sha256`.
 4. Gửi `proof_of_play` theo lô qua `POST /v1/events` (5 phút một lần hoặc đủ 20 sự kiện).
-5. Nhận lệnh `refresh_manifest`, `reboot` (khởi động lại app), `reset_pin` và ack qua `POST /v1/commands/ack`.
+5. Nhận lệnh `refresh_manifest`, `reboot` (khởi động lại app), `reset_pin`, `message`, `set_volume`, `set_orientation` (từ bản 1.0.1) và ack qua `POST /v1/commands/ack`.
 6. Kiểm tra mất mạng bằng `GET /health` mỗi 15 giây (3 lần lỗi thì chuyển sang USB/LAN, 2 lần đạt thì quay lại).
 
 ## 2. Cần AMS bổ sung (theo mức ưu tiên)
@@ -33,7 +33,7 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 | 6 | **Hotline/Zalo** hiện ở màn hình logo | Thêm `hotline` vào phản hồi `heartbeat` (hoặc manifest). App đã đọc sẵn và lưu để hiện cả khi mất mạng. |
 | 7 | **Thời lượng ảnh và kiểu hiển thị** | `creatives[].duration_s` luôn có giá trị với ảnh (app mặc định 10 giây nếu thiếu); thêm `fit` = `fit` hoặc `cover` (mặc định `cover`). |
 | 8 | **Quy tắc xoay vòng** | Chốt cách phát theo `priority` và tần suất (hiện là "gợi ý chưa thuộc giao thức"). App đang phát tuần tự theo `priority` tăng dần, lặp vô hạn. |
-| 9 | **Lệnh bổ sung** | `set_volume` (`percent` 0-100), `set_orientation` (`landscape`/`portrait`), `message` (chữ chạy tạm thời). App bỏ qua lệnh lạ và vẫn ack. |
+| 9 | **Lệnh bổ sung** | `set_volume` (`percent` 0-100), `set_orientation` (`landscape`/`portrait`), `message` (chữ chạy tạm thời). App bỏ qua lệnh lạ và vẫn ack. **Đã hỗ trợ từ app 1.0.1**: `message` hiện dải đỏ giữa màn hình (chữ dài > 40 ký tự thì chạy ngang, ngắn thì hiện tĩnh), tự tắt sau `duration_s` (mặc định 15 giây), tin mới thay tin cũ; tham số sai thì ack `failed`. |
 | 10 | **Cập nhật app từ xa** | `heartbeat` trả `min_app_version` (đã có) kèm `app_update_url` và `app_update_sha256` để box không có kho ứng dụng tự cập nhật. |
 
 ### P2: vận hành
@@ -48,4 +48,4 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 
 - Gateway production là `https://gw-ams.anio.vn`: **đúng**. App dùng làm mặc định (`Prefs.gwBase`).
 - Đăng ký lại với cùng khóa công khai: **luôn nhận lại cùng `device_id`**. App dựa vào điều này khi xóa dữ liệu hoặc khi gặp `unknown_device`.
-- Lệnh giao lại do ack chậm: **AMS đảm bảo `id` lệnh không đổi** (bắt buộc). App bỏ qua id đã xử lý để `reset_pin` không chạy hai lần.
+- Lệnh giao lại do ack chậm: **AMS đảm bảo `id` lệnh không đổi** (bắt buộc). App bỏ qua id đã xử lý để `reset_pin`/`message` không chạy hai lần; danh sách 100 id gần nhất được lưu bền (SharedPreferences) nên vẫn đúng sau khi app khởi động lại.

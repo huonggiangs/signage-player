@@ -14,7 +14,7 @@ import org.json.JSONObject
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-const val APP_VERSION = "1.0.0"
+const val APP_VERSION = "1.0.1"
 
 /** org.json trả chuỗi "null" khi giá trị là null; hàm này trả mặc định. */
 fun JSONObject.s(name: String, def: String = ""): String = if (isNull(name)) def else optString(name, def)
@@ -102,6 +102,10 @@ class Prefs(ctx: Context) {
     var lockUntil: Long
         get() = sp.getLong("lockUntil", 0L)
         set(v) { sp.edit().putLong("lockUntil", v).apply() }
+    /** Id lệnh AMS đã xử lý (tối đa 100, bền qua khởi động lại) để lệnh giao lại không chạy lặp. */
+    var doneCmds: List<String>
+        get() = (sp.getString("doneCmds", "") ?: "").split(',').filter { it.isNotEmpty() }
+        set(v) { sp.edit().putString("doneCmds", v.takeLast(100).joinToString(",")).apply() }
     var batAsked: Boolean
         get() = sp.getBoolean("batAsked", false)
         set(v) { sp.edit().putBoolean("batAsked", v).apply() }

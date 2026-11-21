@@ -25,3 +25,6 @@ Yêu cầu AMS cần bổ sung: `docs/YEU-CAU-BO-SUNG-AMS.md`.
 ## Giao diện
 Màu và bo góc theo ANIO Design System; chữ dùng font hệ thống sans-serif (Roboto trên Android).
 Font San Francisco của Apple không được phép đóng gói vào app Android.
+
+## Lệnh AMS đã hỗ trợ (từ 1.0.1)
+`refresh_manifest`, `reboot`, `reset_pin`, `message` (dải thông báo/chữ chạy), `set_volume`, `set_orientation`. Id lệnh đã xử lý được lưu bền để lệnh giao lại không chạy lặp. Gói USB: giữ nguyên định dạng `ANIO/playlist.json`.

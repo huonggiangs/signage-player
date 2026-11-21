@@ -32,7 +32,8 @@ class Sync(
     private var manifestAt = 0L
     private var nextHb = 300
     private var lanVersion = ""
-    private val doneCmds = ArrayDeque<String>()
+    /** Lệnh cần giao diện thực hiện (message, set_volume, set_orientation); chạy trên luồng chính, trả true nếu hợp lệ. */
+    @Volatile var uiCommand: ((String, org.json.JSONObject) -> Boolean)? = null
     private val net = Executors.newSingleThreadScheduledExecutor()
     private val io = Executors.newSingleThreadScheduledExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -117,27 +118,43 @@ class Sync(
         try { net.schedule(Runnable { hbTick() }, delay.toLong(), TimeUnit.SECONDS) } catch (_: Exception) {}
     }
 
-    private fun handleCommands(cmds: List<Pair<String, String>>) {
+    private fun handleCommands(cmds: List<Cmd>) {
         if (cmds.isEmpty()) return
-        val ack = ArrayList<String>()
+        val ack = ArrayList<Pair<String, Boolean>>()
         var restart = false
-        for ((id, type) in cmds) {
-            ack.add(id)
-            if (doneCmds.contains(id)) continue
-            doneCmds.addLast(id)
-            if (doneCmds.size > 100) doneCmds.removeFirst()
-            Logger.log("lệnh từ ams: $type")
-            when (type) {
+        val done = ArrayList(prefs.doneCmds)
+        for (c in cmds) {
+            if (done.contains(c.id)) { ack.add(Pair(c.id, true)); continue }
+            Logger.log("lệnh từ ams: ${c.type}")
+            var ok = true
+            when (c.type) {
                 "refresh_manifest" -> {
                     manifestEtag = ""
                     io.execute { safe { syncAms() } }
                 }
                 "reset_pin" -> prefs.resetPin()
                 "reboot" -> restart = true
+                "message", "set_volume", "set_orientation" -> ok = runUi(c)
             }
+            // lưu id TRƯỚC khi ack để giao lại sau khi app khởi động lại vẫn bị bỏ qua
+            done.add(c.id)
+            prefs.doneCmds = done
+            ack.add(Pair(c.id, ok))
         }
         try { gw.ackCommands(ack) } catch (e: Exception) { Logger.log("ack lỗi: ${e.message}") }
         if (restart) main.postDelayed({ App.restart(ctx) }, 1500)
+    }
+
+    private fun runUi(c: Cmd): Boolean {
+        val h = uiCommand ?: return false
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var res = false
+        main.post {
+            try { res = h(c.type, c.args) } catch (e: Exception) { Logger.log("lệnh ${c.type} lỗi: ${e.message}") }
+            latch.countDown()
+        }
+        latch.await(5, TimeUnit.SECONDS)
+        return res
     }
 
     private fun loadCachedManifest() {

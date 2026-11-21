@@ -168,6 +168,7 @@ class MainActivity : Activity(), Playback.Ui {
         }
 
         Logger.log("khởi động app")
+        sync.uiCommand = { type, args -> handleUiCommand(type, args) }
         sync.start()
         showSplash(true)
         h.postDelayed({
@@ -550,6 +551,62 @@ class MainActivity : Activity(), Playback.Ui {
         refreshMenu()
     }
 
+    // ------------------------------------------------------------------ lệnh từ AMS
+
+    private fun handleUiCommand(type: String, args: org.json.JSONObject): Boolean {
+        when (type) {
+            "message" -> {
+                val text = args.optString("text", "").trim()
+                if (text.isEmpty() || text.length > 200) return false
+                val d = (if (args.has("duration_s")) args.optInt("duration_s", 15) else args.optInt("seconds", 15)).coerceIn(3, 120)
+                showNotice(text, d)
+                return true
+            }
+            "set_volume" -> {
+                if (!args.has("percent")) return false
+                prefs.volume = args.optInt("percent", 60).coerceIn(0, 100)
+                applyVolume()
+                if (view == V.MENU) refreshMenu()
+                return true
+            }
+            "set_orientation" -> {
+                val o = args.optString("orientation", "")
+                if (o != "landscape" && o != "portrait") return false
+                prefs.landscape = o == "landscape"
+                applyOrientation()
+                rot.wantLandscape = prefs.landscape
+                if (view == V.MENU) refreshMenu()
+                return true
+            }
+        }
+        return false
+    }
+
+    private val noticeHide = Runnable { noticeTv.visibility = View.GONE; noticeTv.isSelected = false }
+
+    /** Dải thông báo phủ trên nội dung; thông báo mới thay thông báo cũ, tự tắt sau [seconds] giây. */
+    private fun showNotice(text: String, seconds: Int) {
+        h.removeCallbacks(noticeHide)
+        noticeTv.isSelected = false
+        noticeTv.text = text
+        if (text.length > 40) {
+            noticeTv.setSingleLine(true)
+            noticeTv.ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            noticeTv.marqueeRepeatLimit = -1
+            noticeTv.gravity = Gravity.CENTER_VERTICAL
+        } else {
+            noticeTv.setSingleLine(false)
+            noticeTv.maxLines = 3
+            noticeTv.ellipsize = null
+            noticeTv.gravity = Gravity.CENTER
+        }
+        noticeTv.visibility = View.VISIBLE
+        noticeTv.bringToFront()
+        noticeTv.isSelected = true
+        h.postDelayed(noticeHide, seconds * 1000L)
+        Logger.log("hiện thông báo ${seconds}s")
+    }
+
     private fun toggleRotate() {
         prefs.landscape = !prefs.landscape
         applyOrientation()
@@ -560,6 +617,7 @@ class MainActivity : Activity(), Playback.Ui {
     // ------------------------------------------------------------------ dựng giao diện
 
     private lateinit var mediaBox: FrameLayout
+    private lateinit var noticeTv: TextView
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -670,6 +728,13 @@ class MainActivity : Activity(), Playback.Ui {
         footerTv.setPadding(dp(16), dp(12), dp(16), dp(12))
         footerTv.visibility = View.GONE
         stage.addView(footerTv, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+
+        // dải thông báo khẩn từ AMS (lệnh message)
+        noticeTv = tv("", 30f, Color.WHITE, true)
+        noticeTv.setBackgroundColor(Color.argb(235, 234, 47, 47))
+        noticeTv.setPadding(dp(24), dp(20), dp(24), dp(20))
+        noticeTv.visibility = View.GONE
+        stage.addView(noticeTv, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
 
         // màn hình logo / chờ
         splash = FrameLayout(this)

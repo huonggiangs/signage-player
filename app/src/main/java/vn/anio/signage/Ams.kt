@@ -23,7 +23,9 @@ class ApiResult(val code: Int, val body: String, val retryAfter: Int, val etag: 
     fun errCode(): String = json()?.optJSONObject("error")?.s("code") ?: ""
 }
 
-class Hb(val ok: Boolean, val nextInterval: Int, val etag: String, val retryAfter: Int, val commands: List<Pair<String, String>>)
+class Cmd(val id: String, val type: String, val args: JSONObject)
+
+class Hb(val ok: Boolean, val nextInterval: Int, val etag: String, val retryAfter: Int, val commands: List<Cmd>)
 
 object Uuid7 {
     private val rnd = SecureRandom()
@@ -139,21 +141,21 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
         val r = call("POST", "/v1/heartbeat", b.toString())
         if (!r.ok) return Hb(false, 0, "", r.retryAfter, emptyList())
         val j = r.json() ?: return Hb(false, 0, "", 0, emptyList())
-        val cmds = ArrayList<Pair<String, String>>()
+        val cmds = ArrayList<Cmd>()
         val a = j.optJSONArray("commands") ?: JSONArray()
         for (i in 0 until a.length()) {
             val c = a.optJSONObject(i) ?: continue
-            cmds.add(Pair(c.s("id"), c.s("type")))
+            cmds.add(Cmd(c.s("id"), c.s("type"), c.optJSONObject("args") ?: JSONObject()))
         }
         val hl = j.s("hotline")
         if (hl.isNotEmpty() && hl != prefs.hotline) prefs.hotline = hl
         return Hb(true, j.optInt("next_interval", 300), j.s("manifest_etag"), 0, cmds)
     }
 
-    fun ackCommands(ids: List<String>) {
-        if (ids.isEmpty()) return
+    fun ackCommands(results: List<Pair<String, Boolean>>) {
+        if (results.isEmpty()) return
         val acks = JSONArray()
-        for (id in ids.take(20)) acks.put(JSONObject().put("id", id).put("status", "ok"))
+        for ((id, ok) in results.take(20)) acks.put(JSONObject().put("id", id).put("status", if (ok) "ok" else "failed"))
         call("POST", "/v1/commands/ack", JSONObject().put("acks", acks).toString())
     }
 
