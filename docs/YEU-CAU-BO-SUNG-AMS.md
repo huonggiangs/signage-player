@@ -44,8 +44,8 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 | 12 | **Hiển thị trạng thái trên admin** | Cột nguồn đang phát (ams/USB/LAN), phiên bản app, dung lượng cache, quyền thiết bị. |
 | 13 | **Phát đồng bộ nhiều màn** | Chưa cần ở bản này; nếu cần, đề xuất `sync_group` và mốc thời gian bắt đầu chung trong manifest. |
 
-## 3. Câu hỏi cần AMS trả lời
+## 3. Câu hỏi đã được xác nhận (2026-11-21)
 
-- Gateway production là `https://gw-ams.anio.vn` đúng không? App dùng giá trị này làm mặc định (đổi được trong mã `Prefs.gwBase`).
-- Thiết bị đăng ký lại với cùng khóa có luôn nhận cùng `device_id` không (app dựa vào điều này khi xóa dữ liệu)?
-- Khi `reset_pin` được giao lại do ack chậm, app bỏ qua id đã xử lý trong phiên; AMS có đảm bảo `id` lệnh không đổi khi giao lại không?
+- Gateway production là `https://gw-ams.anio.vn`: **đúng**. App dùng làm mặc định (`Prefs.gwBase`).
+- Đăng ký lại với cùng khóa công khai: **luôn nhận lại cùng `device_id`**. App dựa vào điều này khi xóa dữ liệu hoặc khi gặp `unknown_device`.
+- Lệnh giao lại do ack chậm: **AMS đảm bảo `id` lệnh không đổi** (bắt buộc). App bỏ qua id đã xử lý để `reset_pin` không chạy hai lần.
