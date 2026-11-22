@@ -97,29 +97,33 @@ class Sync(
     }
 
     private fun hbTick() {
-        var delay = 60
-        try {
-            if (prefs.isSel(Src.AMS)) {
-                if (prefs.deviceId.isEmpty()) {
-                    delay = if (gw.register()) 5 else 900
-                } else {
-                    val hb = gw.heartbeat(state(), manifestEtag)
-                    if (!hb.ok) {
-                        delay = Math.max(hb.retryAfter, 60)
-                    } else {
-                        nextHb = hb.nextInterval.coerceIn(30, 3600)
-                        delay = nextHb
-                        if (hb.etag.isNotEmpty() && hb.etag != manifestEtag) io.execute { safe { syncAms() } }
-                        handleCommands(hb.commands)
-                    }
-                }
-            } else {
-                delay = 60
-            }
-        } catch (e: Exception) {
+        val delay = try { pollOnce() } catch (e: Exception) {
             Logger.log("heartbeat lỗi: ${e.message}")
+            Diag.lastError = "poll: " + (e.message ?: e.javaClass.simpleName).take(80)
+            PollPolicy.REGISTER_RETRY_S
         }
         try { net.schedule(Runnable { hbTick() }, delay.toLong(), TimeUnit.SECONDS) } catch (_: Exception) {}
+    }
+
+    /** Một vòng hỏi AMS (đăng ký nếu chưa có mã -> heartbeat -> lệnh/manifest); trả số giây tới lần sau. */
+    private fun pollOnce(): Int {
+        if (!prefs.isSel(Src.AMS)) return 60
+        if (prefs.deviceId.isEmpty()) return if (gw.register()) 5 else PollPolicy.REGISTER_RETRY_S
+        val hb = gw.heartbeat(state(), manifestEtag)
+        if (!hb.ok && prefs.deviceId.isEmpty()) return 5 // unknown_device: đăng ký lại ngay
+        if (!hb.ok) return PollPolicy.delay(0, hb.retryAfter).coerceAtLeast(60).coerceAtMost(300)
+        nextHb = PollPolicy.delay(hb.nextInterval)
+        if (hb.etag.isNotEmpty() && hb.etag != manifestEtag) io.execute { safe { syncAms() } }
+        handleCommands(hb.commands)
+        return nextHb
+    }
+
+    /** Nút "Đồng bộ ngay": hỏi AMS (lệnh/thông báo) + tải lại manifest tức thì, không đợi chu kỳ. */
+    fun pollNow() {
+        try {
+            net.execute { safe { pollOnce() } }
+            io.execute { safe { manifestEtag = ""; syncAms() } }
+        } catch (_: Exception) {}
     }
 
     private fun handleCommands(cmds: List<Cmd>) {
@@ -144,6 +148,7 @@ class Sync(
             done.add(c.id)
             prefs.doneCmds = done
             ack.add(Pair(c.id, ok))
+            Diag.command(c.type + if (ok) " ✓" else " ✗")
         }
         try { gw.ackCommands(ack) } catch (e: Exception) { Logger.log("ack lỗi: ${e.message}") }
         if (restart) main.postDelayed({ App.restart(ctx) }, 1500)
@@ -173,11 +178,20 @@ class Sync(
 
     private fun syncAms() {
         if (prefs.deviceId.isEmpty()) return
-        val r = gw.manifest(manifestEtag)
+        val r = try {
+            gw.manifest(manifestEtag)
+        } catch (e: Exception) {
+            Diag.manifestCode = -1
+            Diag.lastError = "manifest: " + (e.message ?: e.javaClass.simpleName).take(80)
+            throw e
+        }
         manifestAt = System.currentTimeMillis()
+        Diag.manifestAt = manifestAt
+        Diag.manifestCode = r.code
         if (r.code == 304) return
         if (!r.ok) {
             Logger.log("manifest lỗi ${r.code} ${r.errCode()}")
+            Diag.lastError = "manifest ${r.code} ${r.errCode()}"
             return
         }
         val res = ManifestBuilder.parse(r.body, amsDir, prefs, true) ?: return

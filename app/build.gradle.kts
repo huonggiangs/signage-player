@@ -11,13 +11,27 @@ android {
         applicationId = "vn.anio.signage"
         minSdk = 28
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.1.1"
     }
 
+    // Khóa ký CỐ ĐỊNH (app/anio-signage.jks): mọi bản build đều cùng chữ ký nên cài đè lên bản cũ được và ANDROID_ID không đổi.
+    // Trước 1.1.1 CI ký bằng khóa debug ngẫu nhiên mỗi lần chạy -> không bao giờ cài đè được. KHÔNG đổi/xóa tệp này.
+    signingConfigs {
+        create("anio") {
+            storeFile = file("anio-signage.jks")
+            storePassword = "anio-signage-2026"
+            keyAlias = "anio-signage"
+            keyPassword = "anio-signage-2026"
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("anio")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("anio")
         }
     }
     compileOptions {

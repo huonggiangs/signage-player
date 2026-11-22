@@ -56,8 +56,8 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
 
     fun ensureKeys() {
         if (prefs.seed.isNotEmpty() && prefs.pub.isNotEmpty()) return
-        val seed = ByteArray(32)
-        rnd.nextBytes(seed)
+        val aid = try { android.provider.Settings.Secure.getString(ctx.contentResolver, android.provider.Settings.Secure.ANDROID_ID) } catch (_: Exception) { null }
+        val seed = Identity.seedFor(aid, ctx.packageName) ?: ByteArray(32).also { rnd.nextBytes(it) }
         val priv = Ed25519PrivateKeyParameters(seed, 0)
         prefs.seed = b64e(seed)
         prefs.pub = b64e(priv.generatePublicKey().encoded)
@@ -120,9 +120,20 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
             .put("os", "Android " + Build.VERSION.RELEASE)
             .put("app_version", APP_VERSION)
         if (prefs.region.isNotEmpty()) b.put("region", prefs.region)
-        val r = call("POST", "/v1/register", b.toString(), false)
+        Diag.registerAt = System.currentTimeMillis()
+        val r = try {
+            call("POST", "/v1/register", b.toString(), false)
+        } catch (e: Exception) {
+            Diag.registerCode = -1
+            Diag.registerError = (e.message ?: e.javaClass.simpleName).take(80)
+            Diag.lastError = "register: " + Diag.registerError
+            throw e
+        }
+        Diag.registerCode = r.code
+        Diag.registerError = if (r.ok) "" else r.errCode()
         if (!r.ok) {
             Logger.log("register lỗi ${r.code} ${r.errCode()}")
+            Diag.lastError = "register ${r.code} ${r.errCode()}"
             return false
         }
         val j = r.json() ?: return false
@@ -138,8 +149,19 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
             .put("app_ver", APP_VERSION)
             .put("cache_used_mb", (dirSize(File(ctx.cacheDir, "ams")) / 1048576L).toInt())
         if (etag.isNotEmpty()) b.put("manifest_etag", etag)
-        val r = call("POST", "/v1/heartbeat", b.toString())
-        if (!r.ok) return Hb(false, 0, "", r.retryAfter, emptyList())
+        Diag.hbAt = System.currentTimeMillis()
+        val r = try {
+            call("POST", "/v1/heartbeat", b.toString())
+        } catch (e: Exception) {
+            Diag.hbCode = -1
+            Diag.lastError = "heartbeat: " + (e.message ?: e.javaClass.simpleName).take(80)
+            throw e
+        }
+        Diag.hbCode = r.code
+        if (!r.ok) {
+            Diag.lastError = "heartbeat ${r.code} ${r.errCode()}"
+            return Hb(false, 0, "", r.retryAfter, emptyList())
+        }
         val j = r.json() ?: return Hb(false, 0, "", 0, emptyList())
         val cmds = ArrayList<Cmd>()
         val a = j.optJSONArray("commands") ?: JSONArray()
@@ -149,7 +171,10 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
         }
         val hl = j.s("hotline")
         if (hl.isNotEmpty() && hl != prefs.hotline) prefs.hotline = hl
-        return Hb(true, j.optInt("next_interval", 300), j.s("manifest_etag"), 0, cmds)
+        Diag.cmdAt = Diag.hbAt
+        Diag.group = j.s("manifest_group")
+        Diag.hbNext = j.optInt("next_interval", 300)
+        return Hb(true, Diag.hbNext, j.s("manifest_etag"), 0, cmds)
     }
 
     fun ackCommands(results: List<Pair<String, Boolean>>) {
@@ -198,6 +223,9 @@ object ManifestBuilder {
         val keep = HashSet<String>()
         val files = HashMap<String, File?>()
         var complete = true
+        var failed = 0
+        Diag.manifestSlots = slots.size
+        Diag.manifestCreatives = creatives.size
         val etag = root.s("etag")
         val media = HashMap<String, ZMedia>()
         for (slot in slots) {
@@ -217,7 +245,9 @@ object ManifestBuilder {
                     else dest.exists() && dest.length() > 0
                     if (!ok) {
                         complete = false
-                        Logger.log("warn", "cache", "tải creative lỗi $cid")
+                        failed++
+                        Diag.downloadError = PlaylistIo.lastDownloadError
+                        Logger.log("warn", "cache", "tải creative lỗi $cid: ${PlaylistIo.lastDownloadError}")
                     }
                     files[cid] = if (ok) dest else null
                 }
@@ -248,7 +278,11 @@ object ManifestBuilder {
             val lay = layoutItem(slot, media, gh, gf, etag)
             if (lay != null) out.add(lay) else out.addAll(part)
         }
-        if (download) dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
+        if (download) {
+            Diag.downloadFailed = failed
+            if (failed == 0) Diag.downloadError = ""
+            dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
+        }
         return Parsed(etag, out, complete)
     }
 

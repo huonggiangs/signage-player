@@ -32,6 +32,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.EditText
+import android.widget.Toast
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -68,6 +69,7 @@ class MainActivity : Activity(), Playback.Ui {
     private var holdExit = false
     private var holdActive = false
     private lateinit var splashDevice: TextView
+    private lateinit var splashReason: TextView
     private lateinit var pinForgot: TextView
 
     // overlay views
@@ -268,6 +270,13 @@ class MainActivity : Activity(), Playback.Ui {
     private fun updateDeviceLine() {
         val id = prefs.deviceId
         splashDevice.text = if (id.isEmpty()) "Đang kết nối ams.anio.vn…" else "Mã thiết bị: " + id
+        updateReason()
+    }
+
+    /** Màn chờ luôn nói rõ VÌ SAO chưa có nội dung (tiếng Việt) thay vì chỉ để trống. */
+    private fun updateReason() {
+        if (!::splashReason.isInitialized || !::sync.isInitialized) return
+        splashReason.text = if (curSrc == null) IdleReason.of(Diag.snapshot(prefs, sync.items[Src.AMS]?.size ?: 0, sync.amsDown)) else ""
     }
 
     private fun updateBands() {
@@ -757,6 +766,10 @@ class MainActivity : Activity(), Playback.Ui {
         splashDevice.gravity = Gravity.CENTER
         splashDevice.setPadding(0, dp(14), 0, 0)
         col.addView(splashDevice, LinearLayout.LayoutParams(-1, -2))
+        splashReason = tv("", 13f, Color.rgb(176, 58, 46))
+        splashReason.gravity = Gravity.CENTER
+        splashReason.setPadding(dp(24), dp(10), dp(24), 0)
+        col.addView(splashReason, LinearLayout.LayoutParams(-1, -2))
         splash.addView(col, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         stage.addView(splash, FrameLayout.LayoutParams(-1, -1))
 
@@ -799,14 +812,14 @@ class MainActivity : Activity(), Playback.Ui {
 
     /** Nhãn nhỏ: nguồn, slot/vùng/tệp đang phát, phiên bản manifest, thiết bị đích, bộ nhớ cache. */
     private fun updateDebug() {
+        updateReason()
         if (!prefs.debug) { debugTv.visibility = View.GONE; return }
         val c = playback.current
         val cache = java.io.File(cacheDir, "ams").listFiles()?.size ?: 0
         val sb = StringBuilder()
-        sb.append("v").append(APP_VERSION).append(" · thiết bị ").append(prefs.deviceId.takeLast(8).ifEmpty { "chưa đăng ký" })
-            .append(" (quyền ").append(prefs.trust).append(") · khu vực ").append(prefs.region.ifEmpty { "-" }).append('\n')
-        sb.append("manifest ").append(sync.etag.ifEmpty { "-" }).append(" · cache ").append(cache).append(" tệp")
-        if (sync.amsDown) sb.append(" · MẤT MẠNG")
+        sb.append("v").append(APP_VERSION).append(" · khu vực ").append(prefs.region.ifEmpty { "-" }).append(" · cache ").append(cache).append(" tệp · giờ máy ")
+            .append(Diag.time(System.currentTimeMillis())).append('\n')
+        sb.append(Diag.table(prefs, sync.etag, if (curSrc != null) curSrc!!.label else "", sync.items[Src.AMS]?.size ?: 0, sync.amsDown))
         sb.append('\n').append(playback.debugLine())
         if (c != null && c.manifestEtag.isNotEmpty() && c.manifestEtag != sync.etag) sb.append("\n(mục thuộc manifest ").append(c.manifestEtag).append(')')
         debugTv.text = sb.toString()
@@ -902,6 +915,16 @@ class MainActivity : Activity(), Playback.Ui {
         val dlp = LinearLayout.LayoutParams(-1, dp(44))
         dlp.topMargin = dp(8)
         sheet.addView(debugBtn, dlp)
+
+        val syncBtn = btn("Đồng bộ ngay (hỏi AMS + tải lại danh sách phát)", true) {
+            sync.pollNow()
+            sync.healthNow()
+            Toast.makeText(this, "Đang đồng bộ với AMS…", Toast.LENGTH_SHORT).show()
+            h.postDelayed({ updateDebug() }, 1500)
+        }
+        val sbl = LinearLayout.LayoutParams(-1, dp(44))
+        sbl.topMargin = dp(8)
+        sheet.addView(syncBtn, sbl)
 
         srcLine = tv("", 12f, GREY)
         srcLine.gravity = Gravity.CENTER

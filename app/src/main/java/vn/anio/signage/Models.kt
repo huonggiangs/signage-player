@@ -14,7 +14,7 @@ import org.json.JSONObject
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-const val APP_VERSION = "1.1.0"
+const val APP_VERSION = "1.1.1"
 
 /** org.json trả chuỗi "null" khi giá trị là null; hàm này trả mặc định. */
 fun JSONObject.s(name: String, def: String = ""): String = if (isNull(name)) def else optString(name, def)

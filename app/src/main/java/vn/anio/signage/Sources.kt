@@ -69,6 +69,9 @@ object PlaylistIo {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
+    /** Lý do tải lỗi gần nhất (host + mã/ngoại lệ) để hiện trong bảng chẩn đoán. */
+    @Volatile var lastDownloadError = ""
+
     fun downloadTo(url: String, dest: File, checksum: String, token: String?): Boolean {
         val sum = checksum.trim().lowercase(Locale.US)
         if (dest.exists() && dest.length() > 0 && (sum.isEmpty() || hashOf(dest, sum) == sum)) return true
@@ -77,12 +80,16 @@ object PlaylistIo {
             val rb = Request.Builder().url(url)
             if (!token.isNullOrEmpty()) rb.header("Authorization", "Bearer $token")
             http.newCall(rb.build()).execute().use { r ->
-                if (!r.isSuccessful) return false
+                if (!r.isSuccessful) {
+                    lastDownloadError = "${hostOf(url)} mã ${r.code}"
+                    return false
+                }
                 val body = r.body ?: return false
                 body.byteStream().use { i -> part.outputStream().use { o -> i.copyTo(o) } }
             }
             if (sum.isNotEmpty() && hashOf(part, sum) != sum) {
                 part.delete()
+                lastDownloadError = "${hostOf(url)} sai sha256"
                 false
             } else {
                 dest.delete()
@@ -90,9 +97,12 @@ object PlaylistIo {
             }
         } catch (e: Exception) {
             part.delete()
+            lastDownloadError = "${hostOf(url)} ${(e.message ?: e.javaClass.simpleName).take(60)}"
             false
         }
     }
+
+    private fun hostOf(url: String): String = try { java.net.URI(url).host ?: url.take(40) } catch (_: Exception) { url.take(40) }
 
     private fun parseTime(s: String): Long {
         if (s.isEmpty()) return 0

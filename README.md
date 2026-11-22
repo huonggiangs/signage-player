@@ -8,6 +8,14 @@
 `signage-player-debug.apk` vào Release **debug-latest** (và Artifacts).
 Cài thử: `adb install -r signage-player-debug.apk`
 
+### Chữ ký & cài đè (từ 1.1.1)
+Mọi bản build ký bằng khóa CỐ ĐỊNH `app/anio-signage.jks` (alias `anio-signage`, SHA-256 chứng chỉ ghi ở `docs/YEU-CAU-BO-SUNG-AMS.md`) nên cài đè lên bản cũ không cần gỡ.
+**Không đổi/xóa/tạo lại tệp khóa này**: đổi khóa = Android từ chối cài đè và máy phải gỡ app (mã thiết bị đổi).
+Bản 1.1.0 trở về trước ký bằng khóa debug ngẫu nhiên của CI nên **một lần duy nhất** phải gỡ bản cũ rồi cài 1.1.1; từ đó mọi bản sau cài đè được.
+
+### Mã thiết bị không đổi
+Seed Ed25519 suy ra từ `ANDROID_ID` (theo khóa ký + thiết bị) và được lưu bền. `/v1/register` idempotent theo pubkey nên cùng seed luôn nhận lại đúng `device_id`; gỡ rồi cài lại cùng chữ ký vẫn ra mã cũ.
+
 ## Chế độ HOME (kiosk)
 - App khai báo `CATEGORY_HOME`. Lần đầu bấm nút Home, chọn Signage Player và **Luôn dùng**; từ đó box khởi động và nút Home đều vào app.
 - **Thoát app:** nhấn chuột phải (hoặc giữ nút Back trên điều khiển) 3 giây, nhập mật khẩu. App tạm tắt chế độ HOME để trả về launcher gốc; mở lại app từ icon sẽ bật lại.
@@ -36,3 +44,10 @@ Font San Francisco của Apple không được phép đóng gói vào app Androi
 - Quyền: chỉ `INTERNET` (không cần vị trí: chế độ GPS dùng toạ độ web cấu hình và gửi xuống).
 - Chế độ gỡ lỗi (Menu → "Chế độ gỡ lỗi"): nhãn nhỏ góc màn hình (slot, nội dung, vùng, trạng thái cache, phiên bản manifest, thiết bị), log ra Logcat (`adb logcat | grep Signage`) và gửi lên AMS qua `/v1/logs` mỗi 10 phút.
 - Kiểm thử: `gradle :app:testDebugUnitTest` dùng manifest thật của gateway (`app/src/test/resources/manifest-layout.json`); chạy tự động trong CI.
+
+## Chẩn đoán nhận nội dung (từ 1.1.1)
+- **Màn chờ** luôn có một dòng đỏ nêu LÝ DO chưa có nội dung (chưa đăng ký, mạng lỗi, bị từ chối, manifest trống, tải tệp lỗi, chưa tới khung giờ...).
+- **Menu → Chế độ gỡ lỗi: BẬT** hiện bảng: địa chỉ gateway, mã thiết bị + quyền (quyền 0 = chưa duyệt trên web), nhóm manifest, lần đăng ký/heartbeat/manifest gần nhất kèm mã HTTP, 4 lệnh gần đây, nguồn đang phát, lỗi gần nhất.
+- **Menu → "Đồng bộ ngay"**: hỏi AMS (lệnh, thông báo) và tải lại manifest tức thì.
+- Chu kỳ hỏi AMS bị chặn trần 30 giây (máy chủ mặc định 300–600 giây) nên thông báo khẩn tới trong tối đa ~30 giây; đăng ký lại sau lỗi 30 giây (trước 15 phút).
+- Điều kiện phía web: thiết bị phải được **duyệt** (quyền >= 1) mới nhận thông báo khẩn; chương trình phải **xuất bản**, nội dung đã duyệt, đích là đúng thiết bị/khu vực.

@@ -55,3 +55,10 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 - AMS không cần đổi: app tự dựng URL VietQR nếu thiếu `url`, dùng toạ độ `weather` do web gửi (không cần quyền vị trí).
 - Log gỡ lỗi gửi `/v1/logs` (≤8KB/≤100 dòng, 60 lần/giờ) chỉ khi bật chế độ gỡ lỗi trên máy.
 - Chưa kiểm trên thiết bị thật; CI chạy unit test với manifest thật.
+
+
+## Ký APK & danh tính thiết bị (1.1.1)
+- Khóa ký cố định: `app/anio-signage.jks` (RSA 2048, hiệu lực 100 năm). SHA-256 chứng chỉ: `05:67:D3:DD:64:C2:00:D2:16:D7:75:C0:83:F4:16:01:04:28:AB:12:0F:64:0B:50:09:7B:5A:98:0E:F2:93:62` (xác minh APK bằng `apksigner verify --print-certs`).
+- Gỡ-một-lần: máy đang cài 1.1.0 trở xuống (khóa debug ngẫu nhiên) phải gỡ rồi cài 1.1.1; các bản sau cài đè thẳng.
+- Mã thiết bị: seed Ed25519 = HMAC-SHA256(ANDROID_ID, applicationId); AMS đăng ký idempotent theo pubkey nên `device_id` không đổi khi cài lại cùng chữ ký.
+- Yêu cầu phía AMS: URL media trong manifest phải tải được (gateway mới tự phục vụ `GET /media/*` khi không cấu hình URL công khai); thông báo khẩn chỉ gửi tới thiết bị đã duyệt (quyền >= 1).
