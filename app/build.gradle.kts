@@ -11,8 +11,8 @@ android {
         applicationId = "vn.anio.signage"
         minSdk = 28
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.1.2"
+        versionCode = 6
+        versionName = "1.1.3"
     }
 
     // Khóa ký CỐ ĐỊNH (app/anio-signage.jks): mọi bản build đều cùng chữ ký nên cài đè lên bản cũ được và ANDROID_ID không đổi.

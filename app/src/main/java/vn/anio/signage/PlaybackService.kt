@@ -16,10 +16,10 @@ class PlaybackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
-            nm.createNotificationChannel(NotificationChannel("signage", "Signage Player", NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel("signage", "D play", NotificationManager.IMPORTANCE_LOW))
         }
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, "signage") else Notification.Builder(this)
-        val n = b.setContentTitle("Signage Player")
+        val n = b.setContentTitle("D play")
             .setContentText("Đang phát quảng cáo")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .build()
