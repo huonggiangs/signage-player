@@ -14,7 +14,7 @@ import org.json.JSONObject
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-const val APP_VERSION = "1.0.1"
+const val APP_VERSION = "1.1.0"
 
 /** org.json trả chuỗi "null" khi giá trị là null; hàm này trả mặc định. */
 fun JSONObject.s(name: String, def: String = ""): String = if (isNull(name)) def else optString(name, def)
@@ -39,7 +39,12 @@ data class Item(
     val campaignId: String = "",
     val slotId: String = "",
     val dayStartMin: Int = 0,
-    val dayEndMin: Int = 1440
+    val dayEndMin: Int = 1440,
+    /** Chương trình đa vùng của AMS (slot bp_* có layout): vẽ nhiều vùng cùng lúc thay vì phát tuần tự. */
+    val layout: Layout? = null,
+    val zoneMedia: Map<String, List<ZMedia>> = emptyMap(),
+    /** Phiên bản manifest chứa mục này (hiện trong chế độ gỡ lỗi). */
+    val manifestEtag: String = ""
 ) {
     fun valid(now: Long): Boolean {
         if (!((startAt <= 0 || now >= startAt) && (endAt <= 0 || now <= endAt))) return false
@@ -106,6 +111,10 @@ class Prefs(ctx: Context) {
     var doneCmds: List<String>
         get() = (sp.getString("doneCmds", "") ?: "").split(',').filter { it.isNotEmpty() }
         set(v) { sp.edit().putString("doneCmds", v.takeLast(100).joinToString(",")).apply() }
+    /** Chế độ gỡ lỗi: nhãn nhỏ trên màn hình (slot/vùng/tệp/cache/manifest) và gửi nhật ký lên AMS. */
+    var debug: Boolean
+        get() = sp.getBoolean("debug", false)
+        set(v) { sp.edit().putBoolean("debug", v).apply() }
     var batAsked: Boolean
         get() = sp.getBoolean("batAsked", false)
         set(v) { sp.edit().putBoolean("batAsked", v).apply() }
@@ -147,11 +156,24 @@ class Prefs(ctx: Context) {
 object Logger {
     private var file: File? = null
     private val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    private val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+    private val pending = ArrayList<JSONObject>()
 
     fun init(ctx: Context) { file = File(ctx.cacheDir, "signage.log") }
 
+    fun log(msg: String) = log("info", "player", msg)
+
+    fun err(msg: String) = log("error", "player", msg)
+
     @Synchronized
-    fun log(msg: String) {
+    fun log(level: String, tag: String, msg: String) {
+        try { android.util.Log.println(if (level == "error") 6 else if (level == "warn") 5 else 4, "Signage", "[$tag] $msg") } catch (_: Throwable) {}
+        try {
+            // hàng đợi gửi lên AMS (/v1/logs): tối đa 300 dòng chưa gửi
+            val o = JSONObject().put("ts", iso.format(Date())).put("level", level).put("tag", tag.take(32)).put("msg", msg.take(500))
+            pending.add(o)
+            if (pending.size > 300) pending.removeAt(0)
+        } catch (_: Exception) {}
         val f = file ?: return
         try {
             if (f.length() > 300_000) {
@@ -162,6 +184,23 @@ object Logger {
         } catch (_: Exception) {
         }
     }
+
+    /** Lấy tối đa [max] dòng chưa gửi (kèm giới hạn ~6 KB cho /v1/logs); gọi [restore] nếu gửi lỗi. */
+    @Synchronized
+    fun drain(max: Int): List<JSONObject> {
+        val out = ArrayList<JSONObject>()
+        var bytes = 0
+        while (pending.isNotEmpty() && out.size < max) {
+            val n = pending[0].toString().length + 1
+            if (bytes + n > 6000) break
+            bytes += n
+            out.add(pending.removeAt(0))
+        }
+        return out
+    }
+
+    @Synchronized
+    fun restore(l: List<JSONObject>) { pending.addAll(0, l); while (pending.size > 300) pending.removeAt(0) }
 
     @Synchronized
     fun tail(n: Int): String = try {

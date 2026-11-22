@@ -167,7 +167,8 @@ class MainActivity : Activity(), Playback.Ui {
             Logger.log("network callback: ${e.message}")
         }
 
-        Logger.log("khởi động app")
+        Logger.log("khởi động app " + APP_VERSION)
+        h.postDelayed(debugTick, 3000)
         sync.uiCommand = { type, args -> handleUiCommand(type, args) }
         sync.start()
         showSplash(true)
@@ -527,6 +528,7 @@ class MainActivity : Activity(), Playback.Ui {
         volLabel.text = "Âm lượng " + prefs.volume + "%"
         volFill.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, prefs.volume.toFloat())
         volRest.layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, (100 - prefs.volume).toFloat())
+        debugBtn.text = if (prefs.debug) "Chế độ gỡ lỗi: BẬT (chạm để tắt)" else "Chế độ gỡ lỗi: tắt"
         rotateBtn.text = if (prefs.landscape) "Xoay về màn hình dọc" else "Xoay màn hình ngang"
         val act = playback.active
         val name = if (playback.current == null || act == null) "Chưa có nguồn" else act.label
@@ -618,6 +620,7 @@ class MainActivity : Activity(), Playback.Ui {
 
     private lateinit var mediaBox: FrameLayout
     private lateinit var noticeTv: TextView
+    private lateinit var debugBtn: TextView
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
@@ -729,13 +732,6 @@ class MainActivity : Activity(), Playback.Ui {
         footerTv.visibility = View.GONE
         stage.addView(footerTv, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
 
-        // dải thông báo khẩn từ AMS (lệnh message)
-        noticeTv = tv("", 30f, Color.WHITE, true)
-        noticeTv.setBackgroundColor(Color.argb(235, 234, 47, 47))
-        noticeTv.setPadding(dp(24), dp(20), dp(24), dp(20))
-        noticeTv.visibility = View.GONE
-        stage.addView(noticeTv, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
-
         // màn hình logo / chờ
         splash = FrameLayout(this)
         splash.setBackgroundColor(Color.WHITE)
@@ -777,6 +773,46 @@ class MainActivity : Activity(), Playback.Ui {
         buildPin()
         buildSources()
         buildLan()
+
+        // nhãn gỡ lỗi (chế độ gỡ lỗi trong cài đặt)
+        debugTv = tv("", 10f, Color.WHITE)
+        debugTv.setBackgroundColor(Color.argb(170, 0, 0, 0))
+        debugTv.setPadding(dp(6), dp(3), dp(6), dp(3))
+        debugTv.visibility = View.GONE
+        stage.addView(debugTv, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.START))
+
+        // dải thông báo khẩn từ AMS (lệnh message): thêm CUỐI CÙNG để phủ trên mọi lớp, kể cả màn logo/chờ và cài đặt
+        noticeTv = tv("", 30f, Color.WHITE, true)
+        noticeTv.setBackgroundColor(Color.argb(235, 234, 47, 47))
+        noticeTv.setPadding(dp(24), dp(20), dp(24), dp(20))
+        noticeTv.visibility = View.GONE
+        stage.addView(noticeTv, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER_VERTICAL))
+    }
+
+    private lateinit var debugTv: TextView
+    private val debugTick = object : Runnable {
+        override fun run() {
+            try { updateDebug() } catch (_: Exception) {}
+            h.postDelayed(this, 2000)
+        }
+    }
+
+    /** Nhãn nhỏ: nguồn, slot/vùng/tệp đang phát, phiên bản manifest, thiết bị đích, bộ nhớ cache. */
+    private fun updateDebug() {
+        if (!prefs.debug) { debugTv.visibility = View.GONE; return }
+        val c = playback.current
+        val cache = java.io.File(cacheDir, "ams").listFiles()?.size ?: 0
+        val sb = StringBuilder()
+        sb.append("v").append(APP_VERSION).append(" · thiết bị ").append(prefs.deviceId.takeLast(8).ifEmpty { "chưa đăng ký" })
+            .append(" (quyền ").append(prefs.trust).append(") · khu vực ").append(prefs.region.ifEmpty { "-" }).append('\n')
+        sb.append("manifest ").append(sync.etag.ifEmpty { "-" }).append(" · cache ").append(cache).append(" tệp")
+        if (sync.amsDown) sb.append(" · MẤT MẠNG")
+        sb.append('\n').append(playback.debugLine())
+        if (c != null && c.manifestEtag.isNotEmpty() && c.manifestEtag != sync.etag) sb.append("\n(mục thuộc manifest ").append(c.manifestEtag).append(')')
+        debugTv.text = sb.toString()
+        debugTv.visibility = View.VISIBLE
+        debugTv.bringToFront()
+        if (noticeTv.visibility == View.VISIBLE) noticeTv.bringToFront()
     }
 
     private fun buildMenu() {
@@ -857,6 +893,15 @@ class MainActivity : Activity(), Playback.Ui {
         val rowLp = LinearLayout.LayoutParams(-1, -2)
         rowLp.topMargin = dp(12)
         sheet.addView(row, rowLp)
+
+        debugBtn = btn("", false) {
+            prefs.debug = !prefs.debug
+            refreshMenu()
+            updateDebug()
+        }
+        val dlp = LinearLayout.LayoutParams(-1, dp(44))
+        dlp.topMargin = dp(8)
+        sheet.addView(debugBtn, dlp)
 
         srcLine = tv("", 12f, GREY)
         srcLine.gravity = Gravity.CENTER

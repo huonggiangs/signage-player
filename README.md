@@ -28,3 +28,11 @@ Font San Francisco của Apple không được phép đóng gói vào app Androi
 
 ## Lệnh AMS đã hỗ trợ (từ 1.0.1)
 `refresh_manifest`, `reboot`, `reset_pin`, `message` (dải thông báo/chữ chạy), `set_volume`, `set_orientation`. Id lệnh đã xử lý được lưu bền để lệnh giao lại không chạy lặp. Gói USB: giữ nguyên định dạng `ANIO/playlist.json`.
+
+## Hiển thị nội dung theo web AMS (từ 1.1.0)
+- Đọc `layout` / `zones` trong manifest (slot không có layout vẫn phát tuần tự như cũ). Dựng bố cục theo % màn hình, xoay dọc/ngang đúng; mỗi vùng video có ExoPlayer riêng, chỉ vùng video lớn nhất bật tiếng.
+- Vùng hỗ trợ: video, ảnh, chữ chạy, văn bản, đồng hồ (giờ VN), thời tiết (Open-Meteo, cache 10 phút, offline dùng giá trị cuối), mã QR (zxing cho văn bản; ảnh QR/VietQR tải về từ URL web gửi xuống; ảnh nhúng dạng data URL), header/footer, chuyển cảnh none/fade/slide/zoom.
+- Thông báo khẩn (`message`) phủ lên MỌI màn hình, kể cả màn chờ.
+- Quyền: chỉ `INTERNET` (không cần vị trí: chế độ GPS dùng toạ độ web cấu hình và gửi xuống).
+- Chế độ gỡ lỗi (Menu → "Chế độ gỡ lỗi"): nhãn nhỏ góc màn hình (slot, nội dung, vùng, trạng thái cache, phiên bản manifest, thiết bị), log ra Logcat (`adb logcat | grep Signage`) và gửi lên AMS qua `/v1/logs` mỗi 10 phút.
+- Kiểm thử: `gradle :app:testDebugUnitTest` dùng manifest thật của gateway (`app/src/test/resources/manifest-layout.json`); chạy tự động trong CI.

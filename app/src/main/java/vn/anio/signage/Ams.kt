@@ -162,6 +162,10 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
     fun manifest(etag: String): ApiResult =
         call("GET", if (etag.isEmpty()) "/v1/manifest" else "/v1/manifest?etag=$etag", null)
 
+    /** Nhật ký thiết bị (mục 8.5): tối đa 8 KB/100 dòng mỗi lần. */
+    fun postLogs(entries: JSONArray): ApiResult =
+        call("POST", "/v1/logs", JSONObject().put("entries", entries).toString())
+
     fun postEvents(events: JSONArray): ApiResult =
         call("POST", "/v1/events", JSONObject().put("events", events).toString())
 
@@ -194,8 +198,11 @@ object ManifestBuilder {
         val keep = HashSet<String>()
         val files = HashMap<String, File?>()
         var complete = true
+        val etag = root.s("etag")
+        val media = HashMap<String, ZMedia>()
         for (slot in slots) {
             val ids = slot.optJSONArray("creative_ids") ?: continue
+            val part = ArrayList<Item>()
             for (k in 0 until ids.length()) {
                 val cid = ids.optString(k)
                 val c = creatives[cid] ?: continue
@@ -210,18 +217,20 @@ object ManifestBuilder {
                     else dest.exists() && dest.length() > 0
                     if (!ok) {
                         complete = false
-                        Logger.log("tải creative lỗi $cid")
+                        Logger.log("warn", "cache", "tải creative lỗi $cid")
                     }
                     files[cid] = if (ok) dest else null
                 }
                 val f = files[cid] ?: continue
                 val durS = c.optDouble("duration_s", 10.0)
-                out.add(
+                val dur = (durS * 1000).toLong().coerceAtLeast(1000)
+                media[cid] = ZMedia(cid, isVideo, f.path, dur, c.s("fit") == "fit")
+                part.add(
                     Item(
                         id = slot.s("slot_id") + ":" + cid,
                         isVideo = isVideo,
                         uri = Uri.fromFile(f),
-                        durationMs = (durS * 1000).toLong().coerceAtLeast(1000),
+                        durationMs = dur,
                         header = slot.s("header", gh),
                         footer = slot.s("footer", gf),
                         fit = c.s("fit") == "fit",
@@ -231,12 +240,43 @@ object ManifestBuilder {
                         campaignId = c.s("campaign_id", slot.s("campaign_id")),
                         slotId = slot.s("slot_id"),
                         dayStartMin = slot.optInt("start_min", 0),
-                        dayEndMin = slot.optInt("end_min", 1440)
+                        dayEndMin = slot.optInt("end_min", 1440),
+                        manifestEtag = etag
                     )
                 )
             }
+            val lay = layoutItem(slot, media, gh, gf, etag)
+            if (lay != null) out.add(lay) else out.addAll(part)
         }
         if (download) dir.listFiles()?.forEach { if (it.name !in keep) it.delete() }
-        return Parsed(root.s("etag"), out, complete)
+        return Parsed(etag, out, complete)
+    }
+
+    /** Slot có `layout` hợp lệ -> một mục đa vùng; null = phát tuần tự như thiết bị cũ. */
+    private fun layoutItem(slot: JSONObject, media: Map<String, ZMedia>, gh: String, gf: String, etag: String): Item? {
+        val lay = LayoutParser.parse(slot.optJSONObject("layout")) ?: return null
+        val zm = LayoutParser.zoneMedia(lay, media)
+        // vùng media khai báo nhưng không có tệp nào tải được: không vẽ chương trình dở dang, phát tuần tự
+        if (zm == null) return null
+        val sid = slot.s("slot_id")
+        return Item(
+            id = "$sid:layout",
+            isVideo = false,
+            uri = Uri.EMPTY,
+            durationMs = LayoutParser.programDurationMs(zm),
+            header = slot.s("header", gh),
+            footer = slot.s("footer", gf),
+            fit = false,
+            startAt = 0,
+            endAt = 0,
+            creativeId = "",
+            campaignId = slot.s("campaign_id"),
+            slotId = sid,
+            dayStartMin = slot.optInt("start_min", 0),
+            dayEndMin = slot.optInt("end_min", 1440),
+            layout = lay,
+            zoneMedia = zm,
+            manifestEtag = etag
+        )
     }
 }

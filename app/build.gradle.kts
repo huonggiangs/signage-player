@@ -11,8 +11,8 @@ android {
         applicationId = "vn.anio.signage"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
     }
 
     buildTypes {
@@ -27,6 +27,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     lint { abortOnError = false }
     packaging { resources { excludes += "META-INF/versions/**" } }
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 dependencies {
@@ -36,4 +37,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.4.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("com.google.zxing:core:3.5.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

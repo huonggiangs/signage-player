@@ -49,3 +49,9 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 - Gateway production là `https://gw-ams.anio.vn`: **đúng**. App dùng làm mặc định (`Prefs.gwBase`).
 - Đăng ký lại với cùng khóa công khai: **luôn nhận lại cùng `device_id`**. App dựa vào điều này khi xóa dữ liệu hoặc khi gặp `unknown_device`.
 - Lệnh giao lại do ack chậm: **AMS đảm bảo `id` lệnh không đổi** (bắt buộc). App bỏ qua id đã xử lý để `reset_pin`/`message` không chạy hai lần; danh sách 100 id gần nhất được lưu bền (SharedPreferences) nên vẫn đúng sau khi app khởi động lại.
+
+## 4. Cập nhật 1.1.0 (2026-11-22): app hiển thị theo bố cục web
+- App đọc `layout.zones` từ `/v1/manifest` (tương thích cũ nếu thiếu), dựng bố cục theo %, xoay theo `orientation`.
+- AMS không cần đổi: app tự dựng URL VietQR nếu thiếu `url`, dùng toạ độ `weather` do web gửi (không cần quyền vị trí).
+- Log gỡ lỗi gửi `/v1/logs` (≤8KB/≤100 dòng, 60 lần/giờ) chỉ khi bật chế độ gỡ lỗi trên máy.
+- Chưa kiểm trên thiết bị thật; CI chạy unit test với manifest thật.

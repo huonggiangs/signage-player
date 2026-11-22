@@ -18,7 +18,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 
 /** Một lớp hiển thị: PlayerView (video) + ImageView (ảnh), có ExoPlayer riêng để preload. */
-class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot, Int) -> Unit) {
+class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot, Int) -> Unit) : ZoneEvents {
     companion object {
         const val ENDED = 1
         const val ERROR = 2
@@ -26,6 +26,13 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
 
     private val pv: PlayerView = view.findViewById(R.id.pv)
     private val iv: ImageView = view.findViewById(R.id.iv)
+    private val lv: FrameLayout = view.findViewById(R.id.lv)
+    /** Bộ vẽ bố cục đa vùng khi mục đang nạp là chương trình có layout. */
+    var renderer: ZoneRenderer? = null
+        private set
+    var clockMs: () -> Long = { System.currentTimeMillis() }
+    var playedCb: ((String, Long) -> Unit)? = null
+    var lastError: String = ""
     val player: ExoPlayer = ExoPlayer.Builder(ctx).build()
     var loaded: Item? = null
     var ready = false
@@ -49,13 +56,44 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
         })
     }
 
+    override fun onZonePlayed(creativeId: String, ms: Long) { playedCb?.invoke(creativeId, ms) }
+
+    override fun onZoneError(zoneId: String, creativeId: String, msg: String) {
+        lastError = "vùng $zoneId $creativeId: $msg"
+    }
+
+    private fun dropRenderer() {
+        renderer?.release()
+        renderer = null
+        lv.removeAllViews()
+        lv.visibility = View.GONE
+    }
+
     fun load(item: Item) {
         if (loaded == item && !failed) return
+        dropRenderer()
         loaded = item
         ready = false
         failed = false
         val g = ++gen
-        if (item.isVideo) {
+        if (item.layout != null) {
+            // chương trình đa vùng: mỗi vùng có trình phát riêng, sẵn sàng ngay (vùng tự nạp tệp)
+            player.stop()
+            player.clearMediaItems()
+            pv.visibility = View.GONE
+            iv.setImageDrawable(null)
+            iv.visibility = View.GONE
+            lv.visibility = View.VISIBLE
+            try {
+                renderer = ZoneRenderer(ctx, lv, item, clockMs, this)
+                ready = true
+            } catch (e: Exception) {
+                Logger.log("error", "layout", "dựng bố cục lỗi: ${e.message}")
+                dropRenderer()
+                failed = true
+                onEvent(this, ERROR)
+            }
+        } else if (item.isVideo) {
             iv.setImageDrawable(null)
             iv.visibility = View.GONE
             pv.visibility = View.VISIBLE
@@ -86,11 +124,13 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
     }
 
     fun start() {
+        renderer?.start()
         if (loaded?.isVideo == true) player.play()
     }
 
     fun clear() {
         gen++
+        dropRenderer()
         player.stop()
         player.clearMediaItems()
         iv.setImageDrawable(null)
@@ -166,6 +206,24 @@ class Playback(
     init {
         media.addView(slotB.view)
         media.addView(slotA.view)
+        for (s in listOf(slotA, slotB)) {
+            s.clockMs = { System.currentTimeMillis() + prefs.clockOffset * 1000 }
+            s.playedCb = { cid, ms -> sync.recordPlayId(cid, ms) }
+        }
+    }
+
+    /** Dòng gỡ lỗi: nguồn, mục đang phát, vùng/tệp, manifest. */
+    fun debugLine(): String {
+        val c = current ?: return "không có mục phát (màn chờ)"
+        val sb = StringBuilder()
+        sb.append(active?.label ?: "-").append(" · slot ").append(c.slotId.ifEmpty { c.id }.takeLast(10))
+        if (c.layout != null) {
+            sb.append(" · ").append(c.layout.orientation).append(' ').append(c.layout.zones.size).append(" vùng\n").append(front.renderer?.stateLine() ?: "")
+        } else {
+            sb.append(" · ").append(if (c.isVideo) "video " else "ảnh ").append(c.creativeId.takeLast(8))
+        }
+        if (front.lastError.isNotEmpty()) sb.append("\nlỗi: ").append(front.lastError)
+        return sb.toString()
     }
 
     fun start() {

@@ -24,6 +24,9 @@ class Sync(
 ) {
     val items = ConcurrentHashMap<Src, List<Item>>()
     @Volatile var amsDown = false
+    /** Phiên bản manifest đang giữ (hiện trong chế độ gỡ lỗi). */
+    val etag: String get() = manifestEtag
+    @Volatile var lastLogFlush = 0L
 
     private val gw = Gateway(ctx, prefs)
     private var fails = 0
@@ -48,6 +51,7 @@ class Sync(
         net.scheduleWithFixedDelay({ safe { healthTick() } }, 3, 15, TimeUnit.SECONDS)
         net.schedule(Runnable { hbTick() }, 5, TimeUnit.SECONDS)
         net.scheduleWithFixedDelay({ safe { flushEvents(false) } }, 60, 60, TimeUnit.SECONDS)
+        net.scheduleWithFixedDelay({ safe { flushLogs() } }, 120, 600, TimeUnit.SECONDS)
         io.scheduleWithFixedDelay({ safe { syncAll() } }, 1, 60, TimeUnit.SECONDS)
     }
 
@@ -188,15 +192,18 @@ class Sync(
 
     // ------------------------------------------------------------ sự kiện phát (proof_of_play)
 
+    fun recordPlay(item: Item, playedMs: Long) = recordPlayId(item.creativeId, playedMs)
+
+    /** Ghi proof_of_play cho một creative (chương trình đa vùng ghi theo từng tệp của từng vùng). */
     @Synchronized
-    fun recordPlay(item: Item, playedMs: Long) {
-        if (item.creativeId.isEmpty() || playedMs <= 0) return
+    fun recordPlayId(creativeId: String, playedMs: Long) {
+        if (creativeId.isEmpty() || playedMs <= 0) return
         val now = System.currentTimeMillis()
         val o = JSONObject()
             .put("type", "proof_of_play")
             .put("event_id", Uuid7.gen(now + prefs.clockOffset * 1000))
             .put("ts", isoFmt.format(Date(now + prefs.clockOffset * 1000)))
-            .put("creative_id", item.creativeId)
+            .put("creative_id", creativeId)
             .put("duration_ms", playedMs.coerceIn(0L, 3_600_000L))
         try { eventsFile.appendText(o.toString() + "\n") } catch (_: Exception) {}
     }
@@ -220,6 +227,18 @@ class Sync(
             val rest = lines.drop(batch.size)
             eventsFile.writeText(if (rest.isEmpty()) "" else rest.joinToString("\n") + "\n")
         }
+    }
+
+    /** Gửi nhật ký thiết bị lên AMS (/v1/logs, <=8 KB) mỗi 10 phút để debug từ web; chỉ khi bật chế độ gỡ lỗi. */
+    private fun flushLogs() {
+        if (!prefs.debug || !prefs.isSel(Src.AMS) || prefs.deviceId.isEmpty()) return
+        val batch = Logger.drain(60)
+        if (batch.isEmpty()) return
+        val arr = JSONArray()
+        for (o in batch) arr.put(o)
+        val r = try { gw.postLogs(arr) } catch (e: Exception) { null }
+        if (r == null || (!r.ok && (r.code == 429 || r.code >= 500))) Logger.restore(batch)
+        else lastLogFlush = System.currentTimeMillis()
     }
 
     // ------------------------------------------------------------ USB, LAN

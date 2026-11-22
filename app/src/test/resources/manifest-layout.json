@@ -1,0 +1,185 @@
+{
+  "version": 1,
+  "group": "HN.all.elevator_1080x1920",
+  "tz": "Asia/Ho_Chi_Minh",
+  "etag": "b687e5c7a974a776",
+  "generated_at": "2026-11-22T06:40:51.135Z",
+  "ttl_s": 900,
+  "creatives": [
+    {
+      "id": "01M80ZRWD4XQ4YF9P4FQ43WQVN",
+      "campaign_id": "bp_01M80ZRWD9SHND0RVGNW8055T6",
+      "url": "https://media.test/test/01M80ZRWD3H2EE71HHBSGJSY2M/01M80ZRWD4XQ4YF9P4FQ43WQVN.mp4",
+      "sha256": "709b22f74a7e42a35a96671807eca9d107a7cc288b73b968ac568d3247221b31",
+      "duration_s": 15,
+      "px_w": 1080,
+      "px_h": 1920,
+      "format": "fullscreen",
+      "media_type": "video",
+      "size_bytes": 34,
+      "fit": "fit"
+    },
+    {
+      "id": "01M80ZRWD8SCD6YCF0RF7EXDPQ",
+      "campaign_id": "bp_01M80ZRWD9SHND0RVGNW8055T6",
+      "url": "https://media.test/test/01M80ZRWD3H2EE71HHBSGJSY2M/01M80ZRWD8SCD6YCF0RF7EXDPQ.mp4",
+      "sha256": "598f2c98f641a1bcef3816e9768c3f2b98029ff7691e15d0f3e445ac14bb4e2e",
+      "duration_s": 15,
+      "px_w": 1080,
+      "px_h": 1920,
+      "format": "fullscreen",
+      "media_type": "video",
+      "size_bytes": 34,
+      "fit": "fit"
+    },
+    {
+      "id": "01M80ZRWD8SCD6YCF0RF7EXDPR",
+      "campaign_id": "bp_01M80ZRWD9SHND0RVGNW8055T6",
+      "url": "https://media.test/test/01M80ZRWD3H2EE71HHBSGJSY2M/01M80ZRWD8SCD6YCF0RF7EXDPR.mp4",
+      "sha256": "2bf7380cc3d9d6d4e74808b1831ff7876e100b2ab42b7c23ffdeb8c7120774b9",
+      "duration_s": 15,
+      "px_w": 1080,
+      "px_h": 1920,
+      "format": "fullscreen",
+      "media_type": "video",
+      "size_bytes": 34,
+      "fit": "fit"
+    }
+  ],
+  "schedule": [
+    {
+      "slot_id": "bp_01M80ZRWD9SHND0RVGNW8055T6",
+      "campaign_id": "bp_01M80ZRWD9SHND0RVGNW8055T6",
+      "creative_ids": [
+        "01M80ZRWD4XQ4YF9P4FQ43WQVN",
+        "01M80ZRWD8SCD6YCF0RF7EXDPQ",
+        "01M80ZRWD8SCD6YCF0RF7EXDPR"
+      ],
+      "daypart": "custom",
+      "start_min": 0,
+      "end_min": 1440,
+      "priority": 3,
+      "reward_points": 0,
+      "header": "Chao mung quy khach",
+      "footer": "Hotline 0365361688",
+      "layout": {
+        "orientation": "portrait",
+        "zones": [
+          {
+            "id": "main",
+            "name": "Video chinh",
+            "type": "video",
+            "x": 0,
+            "y": 0,
+            "w": 100,
+            "h": 55,
+            "z": 0,
+            "transition": "fade",
+            "creative_ids": [
+              "01M80ZRWD4XQ4YF9P4FQ43WQVN",
+              "01M80ZRWD8SCD6YCF0RF7EXDPR"
+            ]
+          },
+          {
+            "id": "side",
+            "type": "image",
+            "x": 0,
+            "y": 55,
+            "w": 50,
+            "h": 25,
+            "z": 1,
+            "transition": "slide-left",
+            "creative_ids": [
+              "01M80ZRWD8SCD6YCF0RF7EXDPQ"
+            ]
+          },
+          {
+            "id": "q1",
+            "type": "qr",
+            "x": 50,
+            "y": 55,
+            "w": 25,
+            "h": 25,
+            "z": 1,
+            "qr": {
+              "mode": "vietqr",
+              "vietqr": {
+                "bin": "970436",
+                "account": "0123456789",
+                "name": "ANIO",
+                "amount": 50000,
+                "memo": "Thanh toan"
+              }
+            },
+            "qr_kind": "image_url",
+            "url": "https://img.vietqr.io/image/970436-0123456789-qr_only.png?amount=50000&addInfo=Thanh+toan&accountName=ANIO"
+          },
+          {
+            "id": "q2",
+            "type": "qr",
+            "x": 75,
+            "y": 55,
+            "w": 25,
+            "h": 25,
+            "z": 1,
+            "qr": {
+              "mode": "url",
+              "value": "https://anio.vn"
+            },
+            "qr_kind": "text",
+            "url": "https://anio.vn"
+          },
+          {
+            "id": "w",
+            "type": "weather",
+            "x": 0,
+            "y": 80,
+            "w": 50,
+            "h": 10,
+            "z": 1,
+            "bg_color": "#1D4ED8",
+            "text_color": "#FFFFFF",
+            "weather": {
+              "mode": "fixed",
+              "lat": 21.0285,
+              "lon": 105.8542,
+              "label": "Ha Noi"
+            }
+          },
+          {
+            "id": "clk",
+            "type": "clock",
+            "x": 50,
+            "y": 80,
+            "w": 50,
+            "h": 10,
+            "z": 1,
+            "bg_color": "#111827",
+            "text_color": "#FFFFFF",
+            "font_size": 28
+          },
+          {
+            "id": "tick",
+            "type": "marquee",
+            "x": 0,
+            "y": 90,
+            "w": 100,
+            "h": 10,
+            "z": 2,
+            "text": "Xin chao quy khach",
+            "bg_color": "#DC2626",
+            "text_color": "#FFFFFF",
+            "font_size": 18,
+            "scroll_speed": 60
+          }
+        ]
+      }
+    }
+  ],
+  "header": "",
+  "footer": "",
+  "hotline": "",
+  "rotation": {
+    "mode": "sequential"
+  }
+}
