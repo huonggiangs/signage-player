@@ -45,6 +45,21 @@ class DiagTest {
         assertEquals(120, PollPolicy.delay(300, 120))
     }
 
+    @Test fun neutralSplashLineHidesTechnicalDetails() {
+        assertEquals("", IdleReason.neutral(snap(sel = false)))
+        assertEquals(IdleReason.CONNECTING, IdleReason.neutral(snap(id = "", reg = 0)))
+        assertEquals(IdleReason.FAILED, IdleReason.neutral(snap(id = "", reg = -1, regErr = "Unable to resolve host")))
+        assertEquals(IdleReason.FAILED, IdleReason.neutral(snap(id = "", reg = 403)))
+        assertEquals(IdleReason.FAILED, IdleReason.neutral(snap(down = true)))
+        assertEquals(IdleReason.CONNECTING, IdleReason.neutral(snap(hb = 0)))
+        assertEquals(IdleReason.FAILED, IdleReason.neutral(snap(hb = 401)))
+        assertEquals(IdleReason.CONNECTED, IdleReason.neutral(snap(hb = 200, mf = 200)))
+        for (st in listOf(snap(id = "", reg = -1, regErr = "x"), snap(hb = 401), snap(hb = 200, mf = 500))) {
+            val n = IdleReason.neutral(st)
+            assertFalse(n.contains(Regex("[0-9]{3}")) || n.contains("Mã thiết bị"))
+        }
+    }
+
     @Test fun idleReasonCoversEveryStage() {
         assertTrue(IdleReason.of(snap(sel = false)).contains("TẮT"))
         assertTrue(IdleReason.of(snap(id = "", reg = 0)).contains("Chưa đăng ký"))

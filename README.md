@@ -46,7 +46,8 @@ Font San Francisco của Apple không được phép đóng gói vào app Androi
 - Kiểm thử: `gradle :app:testDebugUnitTest` dùng manifest thật của gateway (`app/src/test/resources/manifest-layout.json`); chạy tự động trong CI.
 
 ## Chẩn đoán nhận nội dung (từ 1.1.1)
-- **Màn chờ** luôn có một dòng đỏ nêu LÝ DO chưa có nội dung (chưa đăng ký, mạng lỗi, bị từ chối, manifest trống, tải tệp lỗi, chưa tới khung giờ...).
+- **Màn chờ** chỉ hiện MỘT dòng trung tính: "Đã kết nối với hệ thống quản trị" / "Đang kết nối hệ thống quản trị…" / "Chưa kết nối được hệ thống quản trị" (không mã lỗi, không mã thiết bị). Lý do chi tiết (chưa duyệt, mã HTTP, tải tệp x/y...) và mã thiết bị chỉ hiện khi bật **Chế độ gỡ lỗi**.
+- **Menu → Thông tin thiết bị**: mã thiết bị, quyền tin cậy/đăng ký, địa chỉ máy chủ và nút **Sao chép mã thiết bị**.
 - **Menu → Chế độ gỡ lỗi: BẬT** hiện bảng: địa chỉ gateway, mã thiết bị + quyền (quyền 0 = chưa duyệt trên web), nhóm manifest, lần đăng ký/heartbeat/manifest gần nhất kèm mã HTTP, 4 lệnh gần đây, nguồn đang phát, lỗi gần nhất.
 - **Menu → "Đồng bộ ngay"**: hỏi AMS (lệnh, thông báo) và tải lại manifest tức thì.
 - Chu kỳ hỏi AMS bị chặn trần 30 giây (máy chủ mặc định 300–600 giây) nên thông báo khẩn tới trong tối đa ~30 giây; đăng ký lại sau lỗi 30 giây (trước 15 phút).

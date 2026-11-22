@@ -60,6 +60,23 @@ data class DiagSnapshot(
 )
 
 object IdleReason {
+    const val CONNECTED = "Đã kết nối với hệ thống quản trị"
+    const val CONNECTING = "Đang kết nối hệ thống quản trị…"
+    const val FAILED = "Chưa kết nối được hệ thống quản trị"
+
+    /** Một dòng trung tính cho màn chờ (không mã lỗi, không mã thiết bị). Rỗng nếu nguồn AMS đang tắt. */
+    fun neutral(s: DiagSnapshot): String {
+        if (!s.amsSelected) return ""
+        if (s.deviceId.isEmpty()) {
+            return if (s.registerCode == 0) CONNECTING else FAILED
+        }
+        if (s.amsDown) return FAILED
+        if (s.hbCode == 0) return CONNECTING
+        if (s.hbCode !in 200..299) return FAILED
+        if (s.manifestCode == 0 || s.manifestCode in 200..399) return CONNECTED
+        return FAILED
+    }
+
     fun of(s: DiagSnapshot): String {
         if (!s.amsSelected) return "Nguồn ams.anio.vn đang TẮT trong Cài đặt."
         if (s.deviceId.isEmpty()) {

@@ -70,6 +70,7 @@ class MainActivity : Activity(), Playback.Ui {
     private var holdActive = false
     private lateinit var splashDevice: TextView
     private lateinit var splashReason: TextView
+    private lateinit var devInfo: TextView
     private lateinit var pinForgot: TextView
 
     // overlay views
@@ -294,14 +295,25 @@ class MainActivity : Activity(), Playback.Ui {
 
     private fun updateDeviceLine() {
         val id = prefs.deviceId
-        splashDevice.text = if (id.isEmpty()) "Đang kết nối ams.anio.vn…" else "Mã thiết bị: " + id
+        // Màn chờ không hiện mã thiết bị; mã chỉ hiện khi bật chế độ gỡ lỗi (và luôn có trong Cài đặt > Thông tin thiết bị).
+        splashDevice.text = if (prefs.debug && id.isNotEmpty()) "Mã thiết bị: " + id else ""
         updateReason()
     }
 
     /** Màn chờ luôn nói rõ VÌ SAO chưa có nội dung (tiếng Việt) thay vì chỉ để trống. */
     private fun updateReason() {
         if (!::splashReason.isInitialized || !::sync.isInitialized) return
-        splashReason.text = if (curSrc == null) IdleReason.of(Diag.snapshot(prefs, sync.items[Src.AMS]?.size ?: 0, sync.amsDown)) else ""
+        if (curSrc != null) { splashReason.text = ""; return }
+        val snap = Diag.snapshot(prefs, sync.items[Src.AMS]?.size ?: 0, sync.amsDown)
+        // Bình thường: một dòng trung tính, màu xám. Chi tiết kỹ thuật chỉ khi bật gỡ lỗi.
+        if (prefs.debug) {
+            splashReason.setTextColor(Color.rgb(176, 58, 46))
+            splashReason.text = IdleReason.of(snap)
+        } else {
+            val n = IdleReason.neutral(snap)
+            splashReason.setTextColor(if (n == IdleReason.FAILED) Color.rgb(176, 58, 46) else GREY)
+            splashReason.text = n
+        }
     }
 
     private fun updateBands() {
@@ -567,8 +579,10 @@ class MainActivity : Activity(), Playback.Ui {
         val act = playback.active
         val name = if (playback.current == null || act == null) "Chưa có nguồn" else act.label
         val off = if (act != null && act != Src.AMS && prefs.isSel(Src.AMS) && sync.amsDown) " (mất mạng)" else ""
-        val dev = if (prefs.deviceId.isEmpty()) "chưa đăng ký" else prefs.deviceId + " (quyền " + prefs.trust + ")"
-        srcLine.text = "Nguồn hiện tại: $name$off\nThiết bị ams: $dev"
+        srcLine.text = "Nguồn hiện tại: $name$off"
+        devInfo.text = "Mã thiết bị: " + (if (prefs.deviceId.isEmpty()) "chưa đăng ký" else prefs.deviceId) +
+            "\nQuyền tin cậy: " + prefs.trust + (if (prefs.deviceId.isEmpty()) " · chưa đăng ký" else " · đã đăng ký") +
+            "\nMáy chủ: " + prefs.gwBase + "\n" + IdleReason.neutral(Diag.snapshot(prefs, sync.items[Src.AMS]?.size ?: 0, sync.amsDown))
     }
 
     private fun refreshSources() {
@@ -837,7 +851,7 @@ class MainActivity : Activity(), Playback.Ui {
 
     /** Nhãn nhỏ: nguồn, slot/vùng/tệp đang phát, phiên bản manifest, thiết bị đích, bộ nhớ cache. */
     private fun updateDebug() {
-        updateReason()
+        if (::splashDevice.isInitialized) updateDeviceLine() else updateReason()
         if (!prefs.debug) { debugTv.visibility = View.GONE; return }
         val c = playback.current
         val cache = java.io.File(cacheDir, "ams").listFiles()?.size ?: 0
@@ -950,6 +964,28 @@ class MainActivity : Activity(), Playback.Ui {
         val sbl = LinearLayout.LayoutParams(-1, dp(44))
         sbl.topMargin = dp(8)
         sheet.addView(syncBtn, sbl)
+
+        val devTitle = tv("Thông tin thiết bị", 13f, Color.WHITE)
+        devTitle.gravity = Gravity.CENTER
+        val dtl = LinearLayout.LayoutParams(-1, -2)
+        dtl.topMargin = dp(14)
+        sheet.addView(devTitle, dtl)
+        devInfo = tv("", 12f, GREY)
+        devInfo.gravity = Gravity.CENTER
+        sheet.addView(devInfo, LinearLayout.LayoutParams(-1, -2))
+        val copyBtn = btn("Sao chép mã thiết bị", false) {
+            val id = prefs.deviceId
+            if (id.isEmpty()) {
+                Toast.makeText(this, "Thiết bị chưa đăng ký", Toast.LENGTH_SHORT).show()
+            } else {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("device", id))
+                Toast.makeText(this, "Đã sao chép mã thiết bị", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val cbl = LinearLayout.LayoutParams(-1, dp(44))
+        cbl.topMargin = dp(6)
+        sheet.addView(copyBtn, cbl)
 
         srcLine = tv("", 12f, GREY)
         srcLine.gravity = Gravity.CENTER
