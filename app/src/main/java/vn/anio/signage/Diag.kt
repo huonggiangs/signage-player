@@ -50,6 +50,7 @@ data class DiagSnapshot(
     val amsDown: Boolean,
     val hbCode: Int,            // 0 = chưa có heartbeat; -1 = lỗi mạng
     val manifestCode: Int,      // 0 = chưa tải manifest
+    val manifestError: String = "",
     val manifestSlots: Int,
     val manifestCreatives: Int,
     val downloadFailed: Int,
@@ -75,6 +76,7 @@ object IdleReason {
         if (s.hbCode == 401 || s.hbCode == 403) return "AMS từ chối thiết bị (mã ${s.hbCode}): thiết bị bị chặn hoặc chưa được nhận."
         if (s.hbCode !in 200..299) return "Heartbeat lỗi mã ${s.hbCode}."
         if (s.manifestCode == 0) return "Chưa tải danh sách phát (manifest) từ AMS."
+        if (s.manifestCode == 401) return "AMS từ chối chữ ký/thiết bị khi tải danh sách phát (401${if (s.manifestError.isEmpty()) "" else " " + s.manifestError}). Đang thử lại và đăng ký lại; nếu kéo dài, kiểm tra giờ hệ thống của TV và thiết bị có bị xóa trên web không."
         if (s.manifestCode !in 200..399) return "Tải manifest lỗi mã ${s.manifestCode}."
         if (s.items == 0 && s.manifestSlots == 0) {
             return "Web chưa có chương trình nào gửi tới nhóm ${s.group.ifEmpty { "?" }} của thiết bị này: " +
@@ -103,11 +105,13 @@ object Diag {
     @Volatile var cmdAt = 0L
     @Volatile var manifestAt = 0L
     @Volatile var manifestCode = 0
+    @Volatile var manifestError = ""
     @Volatile var manifestSlots = 0
     @Volatile var manifestCreatives = 0
     @Volatile var downloadFailed = 0
     @Volatile var downloadError = ""
     @Volatile var lastError = ""
+    @Volatile var realtime = false
 
     @Synchronized
     fun time(ms: Long): String = if (ms <= 0) "-" else fmt.format(Date(ms))
@@ -123,7 +127,7 @@ object Diag {
 
     fun snapshot(prefs: Prefs, items: Int, amsDown: Boolean) = DiagSnapshot(
         amsSelected = prefs.isSel(Src.AMS), deviceId = prefs.deviceId, registerCode = registerCode, registerError = registerError,
-        amsDown = amsDown, hbCode = hbCode, manifestCode = manifestCode, manifestSlots = manifestSlots, manifestCreatives = manifestCreatives,
+        amsDown = amsDown, hbCode = hbCode, manifestCode = manifestCode, manifestError = manifestError, manifestSlots = manifestSlots, manifestCreatives = manifestCreatives,
         downloadFailed = downloadFailed, downloadError = downloadError, items = items, group = group
     )
 
@@ -150,5 +154,25 @@ object Diag {
         c == -1 -> "LỖI MẠNG"
         c in 200..399 -> "OK ($c)"
         else -> "LỖI $c"
+    }
+}
+
+/** Hệ số âm lượng áp lên mọi ExoPlayer khi hệ điều hành KHÔNG cho đổi âm lượng (TV box "volume fixed"/HDMI passthrough). */
+object PlayerGain {
+    @Volatile var value = 1f
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+    fun listen(l: () -> Unit) { listeners.add(l) }
+    fun unlisten(l: () -> Unit) { listeners.remove(l) }
+    fun set(v: Float) {
+        value = v.coerceIn(0f, 1f)
+        for (l in listeners) try { l() } catch (_: Exception) {}
+    }
+
+    /** Quyết định cách áp âm lượng: hệ thống nếu đọc lại đúng, ngược lại hạ qua trình phát. Hàm thuần để kiểm thử. */
+    fun decide(percent: Int, maxSteps: Int, currentSteps: Int, fixed: Boolean): Pair<String, Int> {
+        val want = if (maxSteps <= 0) 0 else Math.round(maxSteps * percent / 100f)
+        val sysOk = !fixed && maxSteps > 0 && currentSteps == want
+        return if (sysOk) Pair("system", Math.round(currentSteps * 100f / maxSteps)) else Pair("player", percent)
     }
 }

@@ -37,7 +37,13 @@ class Sync(
     private var lanVersion = ""
     /** Lệnh cần giao diện thực hiện (message, set_volume, set_orientation); chạy trên luồng chính, trả true nếu hợp lệ. */
     @Volatile var uiCommand: ((String, org.json.JSONObject) -> Boolean)? = null
+    /** Chi tiết kết quả lệnh giao diện vừa chạy (ví dụ âm lượng thực tế), gửi kèm ack. */
+    @Volatile var lastCmdDetail = ""
+    @Volatile var realtimeOk = false
     private val net = Executors.newSingleThreadScheduledExecutor()
+    private val rtExec = Executors.newSingleThreadExecutor()
+    @Volatile private var running = true
+    private val cmdLock = Any()
     private val io = Executors.newSingleThreadScheduledExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val amsDir = File(ctx.cacheDir, "ams")
@@ -50,12 +56,15 @@ class Sync(
         io.execute { safe { loadCachedManifest() } }
         net.scheduleWithFixedDelay({ safe { healthTick() } }, 3, 15, TimeUnit.SECONDS)
         net.schedule(Runnable { hbTick() }, 5, TimeUnit.SECONDS)
+        rtExec.execute { realtimeLoop() }
         net.scheduleWithFixedDelay({ safe { flushEvents(false) } }, 60, 60, TimeUnit.SECONDS)
         net.scheduleWithFixedDelay({ safe { flushLogs() } }, 120, 600, TimeUnit.SECONDS)
         io.scheduleWithFixedDelay({ safe { syncAll() } }, 1, 60, TimeUnit.SECONDS)
     }
 
     fun stop() {
+        running = false
+        rtExec.shutdownNow()
         net.shutdownNow()
         io.shutdownNow()
     }
@@ -118,6 +127,41 @@ class Sync(
         return nextHb
     }
 
+    /**
+     * Kênh thời gian thực: giữ một yêu cầu long-poll GET /v1/commands/wait (<=25 giây) tới AMS; tin khẩn/lệnh tới là áp ngay (~1–2 giây)
+     * thay vì đợi heartbeat. Lỗi mạng/401 thì lùi dần 5→60 giây; heartbeat định kỳ vẫn chạy song song làm dự phòng.
+     */
+    private fun realtimeLoop() {
+        var backoff = 5
+        while (running) {
+            try {
+                if (!prefs.isSel(Src.AMS) || prefs.deviceId.isEmpty() || amsDown) {
+                    realtimeOk = false
+                    Thread.sleep(3000)
+                    continue
+                }
+                val (r, cmds) = gw.waitCommands(25)
+                if (r.ok) {
+                    realtimeOk = true
+                    backoff = 5
+                    if (cmds.isNotEmpty()) handleCommands(cmds)
+                } else {
+                    realtimeOk = false
+                    Diag.lastError = "realtime ${r.code} ${r.errCode()}"
+                    val wait = Math.max(backoff, r.retryAfter).coerceAtMost(300)
+                    backoff = (backoff * 2).coerceAtMost(60)
+                    Thread.sleep(wait * 1000L)
+                }
+            } catch (_: InterruptedException) {
+                return
+            } catch (e: Exception) {
+                realtimeOk = false
+                Thread.sleep(backoff * 1000L)
+                backoff = (backoff * 2).coerceAtMost(60)
+            }
+        }
+    }
+
     /** Nút "Đồng bộ ngay": hỏi AMS (lệnh/thông báo) + tải lại manifest tức thì, không đợi chu kỳ. */
     fun pollNow() {
         try {
@@ -126,9 +170,12 @@ class Sync(
         } catch (_: Exception) {}
     }
 
-    private fun handleCommands(cmds: List<Cmd>) {
+    private fun handleCommands(cmds: List<Cmd>) = synchronized(cmdLock) { handleCommandsLocked(cmds) }
+
+    private fun handleCommandsLocked(cmds: List<Cmd>) {
         if (cmds.isEmpty()) return
         val ack = ArrayList<Pair<String, Boolean>>()
+        val details = HashMap<String, String>()
         var restart = false
         val done = ArrayList(prefs.doneCmds)
         for (c in cmds) {
@@ -142,7 +189,11 @@ class Sync(
                 }
                 "reset_pin" -> prefs.resetPin()
                 "reboot" -> restart = true
-                "message", "set_volume", "set_orientation" -> ok = runUi(c)
+                "message", "set_volume", "set_orientation" -> {
+                    lastCmdDetail = ""
+                    ok = runUi(c)
+                    if (lastCmdDetail.isNotEmpty()) details[c.id] = lastCmdDetail
+                }
             }
             // lưu id TRƯỚC khi ack để giao lại sau khi app khởi động lại vẫn bị bỏ qua
             done.add(c.id)
@@ -150,7 +201,7 @@ class Sync(
             ack.add(Pair(c.id, ok))
             Diag.command(c.type + if (ok) " ✓" else " ✗")
         }
-        try { gw.ackCommands(ack) } catch (e: Exception) { Logger.log("ack lỗi: ${e.message}") }
+        try { gw.ackCommands(ack, details) } catch (e: Exception) { Logger.log("ack lỗi: ${e.message}") }
         if (restart) main.postDelayed({ App.restart(ctx) }, 1500)
     }
 
@@ -176,6 +227,8 @@ class Sync(
         }
     }
 
+    private var retry401 = false
+
     private fun syncAms() {
         if (prefs.deviceId.isEmpty()) return
         val r = try {
@@ -188,6 +241,14 @@ class Sync(
         manifestAt = System.currentTimeMillis()
         Diag.manifestAt = manifestAt
         Diag.manifestCode = r.code
+        Diag.manifestError = if (r.ok || r.code == 304) "" else r.errCode()
+        if (r.code == 401) {
+            // chữ ký/thiết bị bị từ chối: bỏ etag (đường dẫn không tham số) rồi thử lại một lần; unknown_device => đăng ký lại ở vòng hỏi kế tiếp
+            Diag.lastError = "manifest 401 ${r.errCode()}"
+            if (manifestEtag.isNotEmpty()) { manifestEtag = ""; if (!retry401) { retry401 = true; try { syncAms() } finally { retry401 = false }; return } }
+            if (prefs.deviceId.isEmpty()) { net.execute { safe { pollOnce() } } }
+            return
+        }
         if (r.code == 304) return
         if (!r.ok) {
             Logger.log("manifest lỗi ${r.code} ${r.errCode()}")

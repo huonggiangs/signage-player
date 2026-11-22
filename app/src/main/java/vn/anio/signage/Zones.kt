@@ -91,6 +91,7 @@ class MediaZone(
     private val iv = ImageView(ctx)
     private var pv: PlayerView? = null
     private var player: ExoPlayer? = null
+    private var gainCb: (() -> Unit)? = null
     private var idx = -1
     private var started = false
     private var released = false
@@ -109,7 +110,9 @@ class MediaZone(
             p.setShutterBackgroundColor(Color.TRANSPARENT)
             p.setKeepContentOnPlayerReset(true)
             val pl = ExoPlayer.Builder(ctx).build()
-            pl.volume = if (audio) 1f else 0f
+            pl.volume = if (audio) PlayerGain.value else 0f
+            gainCb = { if (audio) try { pl.volume = PlayerGain.value } catch (_: Exception) {} }
+            PlayerGain.listen(gainCb!!)
             pl.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
                     if (state == Player.STATE_READY) status = "đang phát"
@@ -255,6 +258,7 @@ class MediaZone(
         released = true
         gen++
         h.removeCallbacksAndMessages(null)
+        gainCb?.let { PlayerGain.unlisten(it) }
         try { player?.release() } catch (_: Exception) {}
         player = null
         pv?.player = null

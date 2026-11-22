@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -71,22 +72,26 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
         return signer.generateSignature()
     }
 
-    fun call(method: String, path: String, body: String?, withDevice: Boolean = true, retried: Boolean = false): ApiResult {
+    /** Ký ĐÚNG đường dẫn đã mã hóa mà OkHttp sẽ gửi (ví dụ dấu " trong etag thành %22), nếu không máy chủ báo invalid_signature (401). */
+    fun call(method: String, path: String, body: String?, withDevice: Boolean = true, retried: Boolean = false, wait: Boolean = false): ApiResult {
         ensureKeys()
         val bytes = (body ?: "").toByteArray(Charsets.UTF_8)
         val ts = System.currentTimeMillis() / 1000 + prefs.clockOffset
         val nb = ByteArray(16)
         rnd.nextBytes(nb)
         val nonce = b64e(nb)
-        val msg = method + "\n" + path + "\n" + ts + "\n" + nonce + "\n" + sha256hex(bytes)
-        val rb = Request.Builder().url(prefs.gwBase.trimEnd('/') + path)
+        val url = (prefs.gwBase.trimEnd('/') + path).toHttpUrl()
+        val signedPath = url.encodedPath + (url.encodedQuery?.let { "?$it" } ?: "")
+        val msg = method + "\n" + signedPath + "\n" + ts + "\n" + nonce + "\n" + sha256hex(bytes)
+        val rb = Request.Builder().url(url)
             .header("X-Timestamp", ts.toString())
             .header("X-Nonce", nonce)
             .header("X-Signature", b64e(sign(msg.toByteArray(Charsets.UTF_8))))
         if (withDevice) rb.header("X-Device-Id", prefs.deviceId)
         if (method == "POST") rb.post(bytes.toRequestBody("application/json".toMediaType())) else rb.get()
-        val res = PlaylistIo.http.newCall(rb.build()).execute().use { r ->
-            ApiResult(r.code, r.body?.string() ?: "", r.header("Retry-After")?.toIntOrNull() ?: 0, (r.header("ETag") ?: "").trim('"'))
+        val client = if (wait) PlaylistIo.http.newBuilder().readTimeout(40, java.util.concurrent.TimeUnit.SECONDS).callTimeout(45, java.util.concurrent.TimeUnit.SECONDS).build() else PlaylistIo.http
+        val res = client.newCall(rb.build()).execute().use { r ->
+            ApiResult(r.code, r.body?.string() ?: "", r.header("Retry-After")?.toIntOrNull() ?: 0, (r.header("ETag") ?: "").removePrefix("W/").trim('"'))
         }
         if (res.code == 401 && !retried) {
             val code = res.errCode()
@@ -94,7 +99,7 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
                 val st = res.json()?.optJSONObject("error")?.optJSONObject("details")?.optLong("server_time", 0L) ?: 0L
                 if (st > 0) {
                     prefs.clockOffset = st - System.currentTimeMillis() / 1000
-                    return call(method, path, body, withDevice, true)
+                    return call(method, path, body, withDevice, true, wait)
                 }
             } else if (code == "unknown_device") {
                 prefs.deviceId = ""
@@ -177,15 +182,35 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
         return Hb(true, Diag.hbNext, j.s("manifest_etag"), 0, cmds)
     }
 
-    fun ackCommands(results: List<Pair<String, Boolean>>) {
+    fun ackCommands(results: List<Pair<String, Boolean>>, details: Map<String, String> = emptyMap()) {
         if (results.isEmpty()) return
         val acks = JSONArray()
-        for ((id, ok) in results.take(20)) acks.put(JSONObject().put("id", id).put("status", if (ok) "ok" else "failed"))
+        for ((id, ok) in results.take(20)) {
+            val a = JSONObject().put("id", id).put("status", if (ok) "ok" else "failed")
+            details[id]?.let { a.put("result", it.take(400)) }
+            acks.put(a)
+        }
         call("POST", "/v1/commands/ack", JSONObject().put("acks", acks).toString())
     }
 
-    fun manifest(etag: String): ApiResult =
-        call("GET", if (etag.isEmpty()) "/v1/manifest" else "/v1/manifest?etag=$etag", null)
+    fun manifest(etag: String): ApiResult {
+        val e = etag.removePrefix("W/").trim('"')
+        return call("GET", if (e.isEmpty()) "/v1/manifest" else "/v1/manifest?etag=" + java.net.URLEncoder.encode(e, "UTF-8"), null)
+    }
+
+    /** Long-poll lệnh (tin khẩn realtime): giữ kết nối tới 25 giây, trả ngay khi có lệnh. */
+    fun waitCommands(timeoutS: Int = 25): Pair<ApiResult, List<Cmd>> {
+        val r = call("GET", "/v1/commands/wait?timeout=$timeoutS", null, true, false, true)
+        val cmds = ArrayList<Cmd>()
+        if (r.ok) {
+            val a = r.json()?.optJSONArray("commands") ?: JSONArray()
+            for (i in 0 until a.length()) {
+                val c = a.optJSONObject(i) ?: continue
+                cmds.add(Cmd(c.s("id"), c.s("type"), c.optJSONObject("args") ?: JSONObject()))
+            }
+        }
+        return Pair(r, cmds)
+    }
 
     /** Nhật ký thiết bị (mục 8.5): tối đa 8 KB/100 dòng mỗi lần. */
     fun postLogs(entries: JSONArray): ApiResult =

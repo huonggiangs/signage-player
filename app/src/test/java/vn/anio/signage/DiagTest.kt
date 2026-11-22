@@ -73,3 +73,12 @@ class DiagTest {
         assertTrue(IdleReason.of(snap(items = 3)).contains("khung giờ"))
     }
 }
+
+class EtagSignTest {
+    @Test fun weakEtagNormalized() {
+        val raw = "W/\"abc123\""
+        val n = raw.removePrefix("W/").trim('"')
+        assertEquals("abc123", n)
+        assertEquals("abc123", java.net.URLEncoder.encode(n, "UTF-8"))
+    }
+}

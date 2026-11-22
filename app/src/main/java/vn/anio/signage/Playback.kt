@@ -40,8 +40,12 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
     private var gen = 0
     private val main = Handler(Looper.getMainLooper())
 
+    private val gainCb: () -> Unit = { main.post { try { player.volume = PlayerGain.value } catch (_: Exception) {} } }
+
     init {
         pv.player = player
+        player.volume = PlayerGain.value
+        PlayerGain.listen(gainCb)
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (loaded?.isVideo != true) return
@@ -140,6 +144,7 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
     }
 
     fun release() {
+        PlayerGain.unlisten(gainCb)
         clear()
         player.release()
     }

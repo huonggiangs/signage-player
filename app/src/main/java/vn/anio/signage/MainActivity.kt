@@ -239,12 +239,23 @@ class MainActivity : Activity(), Playback.Ui {
         else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     }
 
-    private fun applyVolume() {
+    /** Áp âm lượng: đặt âm lượng hệ thống, đọc lại; nếu máy cố định/không đổi được thì hạ qua ExoPlayer. Trả chuỗi kết quả gửi kèm ack. */
+    private fun applyVolume(): String {
+        var max = 0
+        var cur = 0
+        var fixed = false
         try {
-            val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(max * prefs.volume / 100f), 0)
-        } catch (_: Exception) {
+            cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            fixed = Build.VERSION.SDK_INT >= 21 && audio.isVolumeFixed
+        } catch (e: Exception) {
+            Logger.log("đặt âm lượng hệ thống lỗi: ${e.message}")
         }
+        val (mode, applied) = PlayerGain.decide(prefs.volume, max, cur, fixed)
+        PlayerGain.set(if (mode == "player") prefs.volume / 100f else 1f)
+        Logger.log("âm lượng $mode=$applied% (yêu cầu ${prefs.volume}%, hệ thống $cur/$max, cố định=$fixed)")
+        return "{\"applied_percent\":$applied,\"mode\":\"$mode\",\"system\":\"$cur/$max\",\"fixed\":$fixed}"
     }
 
     // ------------------------------------------------------------------ Playback.Ui
@@ -576,7 +587,7 @@ class MainActivity : Activity(), Playback.Ui {
             "set_volume" -> {
                 if (!args.has("percent")) return false
                 prefs.volume = args.optInt("percent", 60).coerceIn(0, 100)
-                applyVolume()
+                sync.lastCmdDetail = applyVolume()
                 if (view == V.MENU) refreshMenu()
                 return true
             }

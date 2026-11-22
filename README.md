@@ -51,3 +51,8 @@ Font San Francisco của Apple không được phép đóng gói vào app Androi
 - **Menu → "Đồng bộ ngay"**: hỏi AMS (lệnh, thông báo) và tải lại manifest tức thì.
 - Chu kỳ hỏi AMS bị chặn trần 30 giây (máy chủ mặc định 300–600 giây) nên thông báo khẩn tới trong tối đa ~30 giây; đăng ký lại sau lỗi 30 giây (trước 15 phút).
 - Điều kiện phía web: thiết bị phải được **duyệt** (quyền >= 1) mới nhận thông báo khẩn; chương trình phải **xuất bản**, nội dung đã duyệt, đích là đúng thiết bị/khu vực.
+
+## Bản 1.1.2
+- **Lỗi "Tải manifest lỗi mã 401"**: Cloudflare đổi ETag thành dạng yếu `W/"…"`; app ký đường dẫn thô trong khi OkHttp mã hóa `"`→`%22` nên chữ ký lệch. Nay app ký đúng URL đã mã hóa và chuẩn hóa ETag; nếu vẫn 401 sẽ thử lại không ETag và đăng ký lại, hiển thị lý do trong chế độ gỡ lỗi.
+- **Âm lượng**: nếu hệ điều hành không cho đổi (TV box volume cố định/HDMI) app hạ âm lượng qua trình phát (ExoPlayer) và báo về web `applied_percent` + `mode` (`system`|`player`).
+- **Realtime**: app giữ long-poll `GET /v1/commands/wait` (≤25 s) nên lệnh/tin khẩn tới thiết bị trong ~2 s; heartbeat vẫn là dự phòng. Cần gateway mới.

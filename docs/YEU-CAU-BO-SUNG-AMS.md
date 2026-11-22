@@ -62,3 +62,8 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 - Gỡ-một-lần: máy đang cài 1.1.0 trở xuống (khóa debug ngẫu nhiên) phải gỡ rồi cài 1.1.1; các bản sau cài đè thẳng.
 - Mã thiết bị: seed Ed25519 = HMAC-SHA256(ANDROID_ID, applicationId); AMS đăng ký idempotent theo pubkey nên `device_id` không đổi khi cài lại cùng chữ ký.
 - Yêu cầu phía AMS: URL media trong manifest phải tải được (gateway mới tự phục vụ `GET /media/*` khi không cấu hình URL công khai); thông báo khẩn chỉ gửi tới thiết bị đã duyệt (quyền >= 1).
+
+## 1.1.2 — sửa 401 manifest, âm lượng, realtime
+- Ký chữ ký trên `encodedPath?encodedQuery` thực sự gửi đi; ETag chuẩn hóa (bỏ `W/` và dấu `"`).
+- `set_volume`: ack kèm `result` = `{"applied_percent":N,"mode":"system|player",...}`.
+- Kênh realtime long-poll `/v1/commands/wait`; ack theo lô; web hiển thị trạng thái nhận từng thiết bị.
