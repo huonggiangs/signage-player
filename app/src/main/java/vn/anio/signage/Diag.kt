@@ -50,13 +50,13 @@ data class DiagSnapshot(
     val amsDown: Boolean,
     val hbCode: Int,            // 0 = chưa có heartbeat; -1 = lỗi mạng
     val manifestCode: Int,      // 0 = chưa tải manifest
-    val manifestError: String = "",
     val manifestSlots: Int,
     val manifestCreatives: Int,
     val downloadFailed: Int,
     val downloadError: String,
     val items: Int,
-    val group: String
+    val group: String,
+    val manifestError: String = ""
 )
 
 object IdleReason {
