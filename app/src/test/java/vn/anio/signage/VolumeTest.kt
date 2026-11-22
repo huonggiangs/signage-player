@@ -21,4 +21,13 @@ class VolumeTest {
         PlayerGain.set(-1f); assertEquals(0f, PlayerGain.value, 0f)
         PlayerGain.set(1f)
     }
+    @Test fun volumeReportUsesProviderAndClamps() {
+        VolumeReport.provider = null
+        assertEquals(null, VolumeReport.current())
+        VolumeReport.provider = { 140 }
+        assertEquals(100, VolumeReport.current())
+        VolumeReport.provider = { error("loi") }
+        assertEquals(null, VolumeReport.current())
+        VolumeReport.provider = null
+    }
 }

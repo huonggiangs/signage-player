@@ -10,6 +10,7 @@ Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhậ
 1. Lần đầu sinh khóa Ed25519, gọi `POST /v1/register` với `kind=elevator`, `model`, `os`, `app_version`.
 2. Ký mọi yêu cầu `/v1/*` (X-Device-Id, X-Timestamp, X-Nonce, X-Signature), tự bù lệch đồng hồ khi gặp `stale_timestamp`.
 3. `POST /v1/heartbeat` theo `next_interval` của server; `GET /v1/manifest?etag=` khi `manifest_etag` đổi, tải creative và kiểm `sha256`.
+   Heartbeat gửi thêm `volume` (0-100, âm lượng ĐANG áp dụng thật: hệ thống hoặc qua trình phát) để web hiện "Thiết bị báo: N%"; ack `set_volume` kèm `result` JSON `{applied_percent, mode: system|player}` (từ 1.1.4 cả hai).
 4. Gửi `proof_of_play` theo lô qua `POST /v1/events` (5 phút một lần hoặc đủ 20 sự kiện).
 5. Nhận lệnh `refresh_manifest`, `reboot` (khởi động lại app), `reset_pin`, `message`, `set_volume`, `set_orientation` (từ bản 1.0.1) và ack qua `POST /v1/commands/ack`.
 6. Kiểm tra mất mạng bằng `GET /health` mỗi 15 giây (3 lần lỗi thì chuyển sang USB/LAN, 2 lần đạt thì quay lại).

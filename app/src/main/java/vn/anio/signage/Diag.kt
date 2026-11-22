@@ -157,6 +157,12 @@ object Diag {
     }
 }
 
+/** Âm lượng đang áp dụng thật (hệ thống hoặc qua trình phát) để báo lên AMS trong heartbeat (heartbeat.volume) — web hiển thị 'Thiết bị báo: N%'. */
+object VolumeReport {
+    @Volatile var provider: (() -> Int)? = null
+    fun current(): Int? = try { provider?.invoke()?.coerceIn(0, 100) } catch (_: Exception) { null }
+}
+
 /** Hệ số âm lượng áp lên mọi ExoPlayer khi hệ điều hành KHÔNG cho đổi âm lượng (TV box "volume fixed"/HDMI passthrough). */
 object PlayerGain {
     @Volatile var value = 1f

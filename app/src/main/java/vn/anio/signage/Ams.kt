@@ -154,6 +154,7 @@ class Gateway(private val ctx: Context, private val prefs: Prefs) {
             .put("app_ver", APP_VERSION)
             .put("cache_used_mb", (dirSize(File(ctx.cacheDir, "ams")) / 1048576L).toInt())
         if (etag.isNotEmpty()) b.put("manifest_etag", etag)
+        VolumeReport.current()?.let { b.put("volume", it) }
         Diag.hbAt = System.currentTimeMillis()
         val r = try {
             call("POST", "/v1/heartbeat", b.toString())

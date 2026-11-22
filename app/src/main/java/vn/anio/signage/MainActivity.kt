@@ -139,6 +139,7 @@ class MainActivity : Activity(), Playback.Ui {
         buildUi()
         playback = Playback(this, mediaBox, prefs, sync, this)
         applyVolume()
+        VolumeReport.provider = { currentVolumePercent() }
 
         if (Build.VERSION.SDK_INT <= 28 &&
             checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
@@ -237,6 +238,19 @@ class MainActivity : Activity(), Playback.Ui {
     private fun applyOrientation() {
         requestedOrientation = if (prefs.landscape) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    }
+
+    /** Âm lượng ĐANG áp dụng (đọc lại hệ thống, không đặt): gửi trong heartbeat để web thấy giá trị thật. */
+    private fun currentVolumePercent(): Int {
+        var max = 0
+        var cur = 0
+        var fixed = false
+        try {
+            max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            cur = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+            fixed = Build.VERSION.SDK_INT >= 21 && audio.isVolumeFixed
+        } catch (_: Exception) {}
+        return PlayerGain.decide(prefs.volume, max, cur, fixed).second
     }
 
     /** Áp âm lượng: đặt âm lượng hệ thống, đọc lại; nếu máy cố định/không đổi được thì hạ qua ExoPlayer. Trả chuỗi kết quả gửi kèm ack. */
