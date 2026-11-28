@@ -1,0 +1,22 @@
+{
+  "version": 1, "group": "HN.all.elevator_1080x1920", "tz": "Asia/Ho_Chi_Minh", "etag": "pl1", "ttl_s": 900,
+  "creatives": [
+    {"id":"cv1","campaign_id":"bp_P1","url":"https://media.test/a.mp4","sha256":"aa","duration_s":15,"px_w":1080,"px_h":1920,"media_type":"video","fit":"fit"},
+    {"id":"ci1","campaign_id":"bp_P1","url":"https://media.test/b.jpg","sha256":"bb","duration_s":10,"px_w":1080,"px_h":1920,"media_type":"image","fit":"cover"}
+  ],
+  "schedule": [
+    {"slot_id":"s1","campaign_id":"bp_P1","creative_ids":["cv1","ci1"],"start_min":0,"end_min":1440,"priority":10,
+     "layout":{"orientation":"portrait","zones":[
+       {"id":"main","type":"video","x":0,"y":0,"w":100,"h":80,"z":0,"creative_ids":["cv1","ci1"],"loop":true,
+        "playlist":[
+          {"id":"it-video","type":"video","name":"TVC","media_id":"cv1","url":"https://media.test/a.mp4","sha256":"aa","duration_ms":15000,"play_s":null},
+          {"id":"it-text","type":"text","name":"KM","text_content":"Khuyến mãi","rich":"<p>Khuyến mãi</p>","style":{"color":"#ffffff","background":"#dc2626","font_size":40},"play_s":8},
+          {"id":"it-img","type":"image","name":"Anh","media_id":"ci1","url":"https://media.test/b.jpg","sha256":"bb","duration":20,"play_s":20},
+          {"id":"it-ext","type":"image","name":"Ngoai","url":"https://cdn.test/x.jpg","delivery":"external","play_s":8},
+          {"id":"it-stream","type":"video","name":"HLS","url":"https://cdn.test/live.m3u8","delivery":"stream","kind":"hls","play_s":null},
+          {"id":"it-gone","type":"video","name":"Mat","media_id":"khong-co","url":"https://media.test/gone.mp4","sha256":"cc","play_s":null}
+        ]},
+       {"id":"old","type":"image","x":0,"y":80,"w":100,"h":20,"z":1,"creative_ids":["ci1"]}
+     ]}}
+  ]
+}

@@ -32,6 +32,7 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
         private set
     var clockMs: () -> Long = { System.currentTimeMillis() }
     var playedCb: ((String, Long) -> Unit)? = null
+    var itemCb: ((String, String, ZMedia) -> Unit)? = null
     var lastError: String = ""
     val player: ExoPlayer = ExoPlayer.Builder(ctx).build()
     var loaded: Item? = null
@@ -61,6 +62,8 @@ class Slot(private val ctx: Context, val view: View, private val onEvent: (Slot,
     }
 
     override fun onZonePlayed(creativeId: String, ms: Long) { playedCb?.invoke(creativeId, ms) }
+
+    override fun onItemShown(zoneId: String, programId: String, item: ZMedia) { itemCb?.invoke(programId, zoneId, item) }
 
     override fun onZoneError(zoneId: String, creativeId: String, msg: String) {
         lastError = "vùng $zoneId $creativeId: $msg"
@@ -214,6 +217,7 @@ class Playback(
         for (s in listOf(slotA, slotB)) {
             s.clockMs = { System.currentTimeMillis() + prefs.clockOffset * 1000 }
             s.playedCb = { cid, ms -> sync.recordPlayId(cid, ms) }
+            s.itemCb = { prog, zone, it -> sync.recordItem(prog, zone, it) }
         }
     }
 

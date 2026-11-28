@@ -1,7 +1,7 @@
-# Signage Player (Android 9+)
+# D Play (trước đây: Signage Player) (Android 9+)
 
 Ứng dụng phát video/ảnh quảng cáo màn hình dọc 9:16 cho Android TV box thang máy, nối với AMS
-(`ams.anio.vn`, gateway `gw-ams.anio.vn`). Mô tả chức năng: `Tai lieu mo ta - Signage Player Android.md`.
+(`ams.anio.vn`, gateway `gw-ams.anio.vn`). Mô tả chức năng: `Tai lieu mo ta - Signage Player Android.md (tên tệp tài liệu cũ)`.
 
 ## Build APK
 Đẩy lên nhánh `main`: workflow `.github/workflows/build-apk.yml` build và đăng
@@ -17,7 +17,7 @@ Bản 1.1.0 trở về trước ký bằng khóa debug ngẫu nhiên của CI n�
 Seed Ed25519 suy ra từ `ANDROID_ID` (theo khóa ký + thiết bị) và được lưu bền. `/v1/register` idempotent theo pubkey nên cùng seed luôn nhận lại đúng `device_id`; gỡ rồi cài lại cùng chữ ký vẫn ra mã cũ.
 
 ## Chế độ HOME (kiosk)
-- App khai báo `CATEGORY_HOME`. Lần đầu bấm nút Home, chọn Signage Player và **Luôn dùng**; từ đó box khởi động và nút Home đều vào app.
+- App khai báo `CATEGORY_HOME`. Lần đầu bấm nút Home, chọn D Play và **Luôn dùng**; từ đó box khởi động và nút Home đều vào app.
 - **Thoát app:** nhấn chuột phải (hoặc giữ nút Back trên điều khiển) 3 giây, nhập mật khẩu. App tạm tắt chế độ HOME để trả về launcher gốc; mở lại app từ icon sẽ bật lại.
 - **Mở cài đặt:** giữ chuột trái 3 giây, nhấn đúp, hoặc nút OK. Mật khẩu mặc định `1234`, bắt buộc đổi lần đầu.
 - **Quên mật khẩu:** vận hành viên gửi lệnh `reset_pin` trên ams.anio.vn (xem `docs/YEU-CAU-BO-SUNG-AMS.md`).
@@ -57,3 +57,10 @@ Font San Francisco của Apple không được phép đóng gói vào app Androi
 - **Lỗi "Tải manifest lỗi mã 401"**: Cloudflare đổi ETag thành dạng yếu `W/"…"`; app ký đường dẫn thô trong khi OkHttp mã hóa `"`→`%22` nên chữ ký lệch. Nay app ký đúng URL đã mã hóa và chuẩn hóa ETag; nếu vẫn 401 sẽ thử lại không ETag và đăng ký lại, hiển thị lý do trong chế độ gỡ lỗi.
 - **Âm lượng**: nếu hệ điều hành không cho đổi (TV box volume cố định/HDMI) app hạ âm lượng qua trình phát (ExoPlayer) và báo về web `applied_percent` + `mode` (`system`|`player`).
 - **Realtime**: app giữ long-poll `GET /v1/commands/wait` (≤25 s) nên lệnh/tin khẩn tới thiết bị trong ~2 s; heartbeat vẫn là dự phòng. Cần gateway mới.
+
+
+## Danh sách phát và lượt xem theo mục (1.1.5)
+
+- Vùng media phát `playlist[]` của manifest (docs/PLAYLIST.md bên AMS): video/ảnh/chữ/link, tuần tự, lặp (`loop`), nạp trước video kế (2 ExoPlayer luân phiên), bỏ qua mục lỗi (ghi log `/v1/logs`), mọi mục lỗi thì màn chờ 8 giây rồi thử lại. Vùng cũ chỉ có `creative_ids` vẫn phát (đọc thành danh sách, id `lg-<vùng>-<creative>`).
+- `item_impression`: mỗi mục hiển thị ổn định >= 1 giây ghi một bản ghi `log_id` (UUIDv7). Hàng đợi bền `event-queue.json` (chung với `proof_of_play`), gửi `POST /v1/events` mỗi 5 phút hoặc đủ 50 bản ghi, tối đa 50/lô. Chỉ xóa khi máy chủ trả 2xx; 401/lệch giờ/429/5xx/mất mạng thì giữ và lùi mũ; 413 và 400/422 thì chia đôi lô để cô lập sự kiện hỏng (sự kiện đơn lẻ bị từ chối mới bị bỏ sau 5 lần). Giờ gửi = giờ máy + độ lệch đồng hồ mới nhất lúc gửi. Dữ liệu `events.jsonl` của 1.1.4 được nhập tự động.
+- Kiểm thử chấp nhận tay: xem `docs/NGHIEM-THU-1.1.5.md`.

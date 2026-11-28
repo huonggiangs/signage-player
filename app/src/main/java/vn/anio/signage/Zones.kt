@@ -73,30 +73,45 @@ class PctFrame(ctx: Context, private val designWidth: Int) : ViewGroup(ctx) {
     }
 }
 
-/** Gọi về bên phát: tệp trong vùng đã phát xong (proof_of_play) và lỗi tải/phát. */
+/** Gọi về bên phát: tệp trong vùng đã phát xong (proof_of_play), lỗi tải/phát và mục danh sách đã hiển thị ổn định (item_impression). */
 interface ZoneEvents {
     fun onZonePlayed(creativeId: String, ms: Long)
     fun onZoneError(zoneId: String, creativeId: String, msg: String)
+    /** Mục [item] của vùng [zoneId] (chương trình [programId]) đã hiển thị ổn định (>= 1 giây hoặc khung hình đầu). Không gọi khi xem trước. */
+    fun onItemShown(zoneId: String, programId: String, item: ZMedia) {}
 }
 
-/** Vùng video/ảnh: danh sách tệp lặp vô hạn, ExoPlayer riêng cho vùng, chuyển cảnh fade/slide/zoom đơn giản. */
+/**
+ * Vùng video/ảnh/chữ chạy danh sách phát (docs/PLAYLIST.md): tuần tự, lặp nếu `loop`, nạp trước video kế (hai ExoPlayer luân phiên),
+ * bỏ qua mục lỗi (ghi log), mọi mục lỗi thì hiện màn chờ 8 giây rồi thử lại cả danh sách. Vùng cũ (creative_ids) chạy như danh sách.
+ */
 class MediaZone(
     private val ctx: Context,
     private val zone: Zone,
     private val items: List<ZMedia>,
     private val audio: Boolean,
-    private val events: ZoneEvents
+    private val events: ZoneEvents,
+    private val programId: String = "",
+    private val preview: Boolean = false
 ) : FrameLayout(ctx), ScaledZone {
     private val h = Handler(Looper.getMainLooper())
     private val iv = ImageView(ctx)
+    private val tvBox = FrameLayout(ctx)
+    private val tv = TextView(ctx)
+    private val waitTv = TextView(ctx)
     private var pv: PlayerView? = null
     private var player: ExoPlayer? = null
-    private var gainCb: (() -> Unit)? = null
+    private var spare: ExoPlayer? = null
+    private var spareIdx = -1
+    private val gainCbs = ArrayList<() -> Unit>()
+    private val seq = PlaylistSequencer(items.size, zone.loop)
     private var idx = -1
     private var started = false
     private var released = false
+    private var ready = false
     private var gen = 0
     private var shownAt = 0L
+    private var scale = 1f
     private var status = "chờ"
     private val next = Runnable { advance() }
 
@@ -104,118 +119,262 @@ class MediaZone(
         setBackgroundColor(Color.BLACK)
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
         iv.visibility = View.GONE
-        if (items.any { it.isVideo }) {
+        if (items.any { it.kind == "video" }) {
             val p = PlayerView(ctx)
             p.useController = false
             p.setShutterBackgroundColor(Color.TRANSPARENT)
             p.setKeepContentOnPlayerReset(true)
-            val pl = ExoPlayer.Builder(ctx).build()
-            pl.volume = if (audio) PlayerGain.value else 0f
-            gainCb = { if (audio) try { pl.volume = PlayerGain.value } catch (_: Exception) {} }
-            PlayerGain.listen(gainCb!!)
-            pl.addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_READY) status = "đang phát"
-                    if (state == Player.STATE_ENDED && started) advance()
-                }
-
-                override fun onPlayerError(error: PlaybackException) {
-                    val cid = items.getOrNull(idx)?.creativeId ?: ""
-                    status = "lỗi phát"
-                    Logger.log("vùng ${zone.id}: lỗi phát $cid: ${error.errorCodeName}")
-                    events.onZoneError(zone.id, cid, "lỗi phát ${error.errorCodeName}")
-                    h.removeCallbacks(next)
-                    h.postDelayed(next, 3000)
-                }
-            })
-            p.player = pl
+            player = newPlayer()
+            p.player = player
             p.visibility = View.GONE
             pv = p
-            player = pl
             addView(p, LayoutParams(-1, -1))
         }
         addView(iv, LayoutParams(-1, -1))
-        if (items.isNotEmpty()) show(0)
+        tv.gravity = Gravity.CENTER
+        tvBox.addView(tv, LayoutParams(-1, -1))
+        tvBox.visibility = View.GONE
+        addView(tvBox, LayoutParams(-1, -1))
+        waitTv.text = "Đang chờ nội dung…"
+        waitTv.setTextColor(Color.parseColor("#9CA3AF"))
+        waitTv.gravity = Gravity.CENTER
+        waitTv.visibility = View.GONE
+        addView(waitTv, LayoutParams(-1, -1))
+        if (items.isNotEmpty()) handle(seq.start())
     }
 
-    override fun applyScale(scale: Float) {}
+    private fun newPlayer(): ExoPlayer {
+        val pl = ExoPlayer.Builder(ctx).build()
+        pl.volume = if (audio) PlayerGain.value else 0f
+        val cb: () -> Unit = { if (audio) try { pl.volume = PlayerGain.value } catch (_: Exception) {} }
+        gainCbs.add(cb)
+        PlayerGain.listen(cb)
+        pl.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (pl !== player || released) return
+                if (state == Player.STATE_READY) onVideoReady()
+                if (state == Player.STATE_ENDED && started) advance()
+            }
 
-    /** Bắt đầu phát (đã nạp sẵn mục đầu ở chế độ tạm dừng để lên hình ngay). */
+            override fun onPlayerError(error: PlaybackException) {
+                if (released) return
+                if (pl !== player) { if (pl === spare) spareIdx = -1; return } // nạp trước hỏng: sẽ lỗi lại khi tới lượt và bị bỏ qua lúc đó
+                fail("lỗi phát ${error.errorCodeName}")
+            }
+        })
+        return pl
+    }
+
+    override fun applyScale(scale: Float) {
+        this.scale = scale
+        val m = items.getOrNull(idx)
+        if (m != null && m.isText) renderText(m)
+    }
+
+    /** Bắt đầu phát (mục đầu đã nạp sẵn ở chế độ tạm dừng để lên hình ngay). */
     fun start() {
         if (released) return
         started = true
-        shownAt = SystemClock.elapsedRealtime()
         val m = items.getOrNull(idx) ?: return
-        if (m.isVideo) {
-            player?.playWhenReady = true
-            player?.play()
-        } else {
-            scheduleImage(m)
+        if (m.kind == "video") { player?.playWhenReady = true; player?.play() }
+        if (ready) armTimers(m)
+    }
+
+    // ------------------------------------------------------------ điều phối
+
+    private fun handle(step: PlaylistSequencer.Step) {
+        if (released) return
+        when (step) {
+            is PlaylistSequencer.Step.Play -> show(step.index)
+            PlaylistSequencer.Step.AllFailed -> {
+                status = "mọi mục lỗi: chờ"
+                Logger.log("vùng ${zone.id}: mọi mục đều lỗi, chờ ${Playlists.WAIT_SCREEN_MS / 1000}s rồi thử lại")
+                ready = false
+                hideAll()
+                waitTv.visibility = View.VISIBLE
+                h.removeCallbacks(next)
+                h.postDelayed({ if (!released) { waitTv.visibility = View.GONE; handle(seq.restart()) } }, Playlists.WAIT_SCREEN_MS)
+            }
+            PlaylistSequencer.Step.Finished -> { status = "hết danh sách"; reportCurrent() }
         }
     }
 
     private fun advance() {
         if (released || items.isEmpty()) return
+        h.removeCallbacks(next)
         reportCurrent()
-        show((idx + 1) % items.size)
-        if (started) {
-            val m = items[idx]
-            shownAt = SystemClock.elapsedRealtime()
-            if (!m.isVideo) scheduleImage(m)
-        }
+        val step = seq.onItemEnded()
+        // danh sách một mục lặp lại chính nó: giữ nguyên hình, chỉ tính vòng mới
+        if (step is PlaylistSequencer.Step.Play && step.index == idx && ready) { replay(); return }
+        handle(step)
     }
 
-    private fun scheduleImage(m: ZMedia) {
+    private fun fail(msg: String) {
+        val m = items.getOrNull(idx)
+        status = "lỗi: $msg"
+        Logger.log("warn", "player", "vùng ${zone.id}: bỏ qua mục ${m?.itemId} $msg")
+        events.onZoneError(zone.id, m?.creativeId ?: "", msg)
         h.removeCallbacks(next)
-        if (items.size > 1) h.postDelayed(next, Math.max(2000L, m.durationMs))
+        ready = false
+        val g = gen
+        h.postDelayed({ if (!released && g == gen) handle(seq.onItemFailed()) }, 200)
+    }
+
+    private fun replay() {
+        val m = items[idx]
+        shownAt = SystemClock.elapsedRealtime()
+        if (m.kind == "video") { player?.seekTo(0); player?.playWhenReady = true; player?.play() }
+        armTimers(m)
+    }
+
+    private fun armTimers(m: ZMedia) {
+        h.removeCallbacksAndMessages(null)
+        shownAt = SystemClock.elapsedRealtime()
+        val g = gen
+        if (!preview) h.postDelayed({ if (!released && g == gen && ready) events.onItemShown(zone.id, programId, m) }, Playlists.IMPRESSION_STABLE_MS)
+        if (m.kind == "video") {
+            m.cutMs?.let { h.postDelayed(next, it) }
+        } else if (items.size > 1 || zone.loop) {
+            h.postDelayed(next, Math.max(1000L, m.durationMs))
+        }
     }
 
     private fun reportCurrent() {
         val m = items.getOrNull(idx) ?: return
         if (!started || shownAt <= 0) return
         val ms = SystemClock.elapsedRealtime() - shownAt
-        if (ms > 0) events.onZonePlayed(m.creativeId, ms)
+        if (ms > 0 && m.creativeId.isNotEmpty()) events.onZonePlayed(m.creativeId, ms)
         shownAt = 0
     }
+
+    private fun hideAll() {
+        iv.visibility = View.GONE
+        tvBox.visibility = View.GONE
+        pv?.visibility = View.GONE
+        player?.let { it.playWhenReady = false }
+    }
+
+    private fun onVideoReady() {
+        status = "đang phát"
+        val m = items.getOrNull(idx) ?: return
+        if (ready) return
+        ready = true
+        if (started) armTimers(m)
+    }
+
+    // ------------------------------------------------------------ hiển thị một mục
+
+    private fun mediaItemOf(m: ZMedia): MediaItem =
+        if (m.remoteUrl.isNotEmpty()) MediaItem.fromUri(Uri.parse(m.remoteUrl)) else MediaItem.fromUri(Uri.fromFile(File(m.path)))
 
     private fun show(i: Int) {
         idx = i
         val m = items[i]
         val g = ++gen
+        ready = false
+        waitTv.visibility = View.GONE
         status = "nạp"
-        if (m.isVideo) {
-            iv.visibility = View.GONE
-            pv?.visibility = View.VISIBLE
-            val pl = player ?: return
-            pv?.resizeMode = if (m.fit) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            pl.repeatMode = if (items.size == 1) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-            pl.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(m.path))))
-            pl.playWhenReady = started
-            pl.prepare()
-            animateIn(pv)
-        } else {
-            player?.let { it.stop(); it.clearMediaItems() }
-            pv?.visibility = View.GONE
-            iv.visibility = View.VISIBLE
-            iv.scaleType = if (m.fit) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
-            Thread {
-                val bmp = decode(m.path)
-                h.post {
-                    if (g == gen && !released) {
-                        if (bmp == null) {
-                            status = "lỗi ảnh"
-                            Logger.log("vùng ${zone.id}: không đọc được ảnh ${m.creativeId}")
-                            events.onZoneError(zone.id, m.creativeId, "không đọc được ảnh")
-                            if (items.size > 1) { h.removeCallbacks(next); h.postDelayed(next, 3000) }
-                        } else {
-                            iv.setImageBitmap(bmp)
-                            status = "đang phát"
-                            animateIn(iv)
+        when (m.kind) {
+            "video" -> {
+                iv.visibility = View.GONE
+                tvBox.visibility = View.GONE
+                val v = pv
+                var pl = player
+                if (v == null || pl == null) { fail("không có trình phát"); return }
+                v.visibility = View.VISIBLE
+                v.resizeMode = if (m.fit) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                if (spare != null && spareIdx == i) {
+                    // video này đã được nạp trước: đổi trình phát, không đứt
+                    val old = pl
+                    pl = spare!!
+                    spare = old
+                    spareIdx = -1
+                    player = pl
+                    v.player = pl
+                    try { old.playWhenReady = false; old.stop(); old.clearMediaItems() } catch (_: Exception) {}
+                    pl.playWhenReady = started
+                    if (pl.playbackState == Player.STATE_READY) { onVideoReady() }
+                } else {
+                    try {
+                        pl.setMediaItem(mediaItemOf(m))
+                        pl.playWhenReady = started
+                        pl.prepare()
+                    } catch (e: Exception) { fail("không mở được video"); return }
+                }
+                animateIn(v)
+                preloadNext()
+            }
+            "text" -> {
+                player?.let { it.playWhenReady = false }
+                pv?.visibility = View.GONE
+                iv.visibility = View.GONE
+                renderText(m)
+                tvBox.visibility = View.VISIBLE
+                ready = true
+                status = "đang phát"
+                animateIn(tvBox)
+                if (started) armTimers(m)
+            }
+            else -> {
+                player?.let { it.playWhenReady = false }
+                pv?.visibility = View.GONE
+                tvBox.visibility = View.GONE
+                iv.visibility = View.VISIBLE
+                iv.scaleType = if (m.fit) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
+                Thread {
+                    val bmp = if (m.remoteUrl.isNotEmpty()) fetch(m.remoteUrl) else decode(m.path)
+                    h.post {
+                        if (g == gen && !released) {
+                            if (bmp == null) {
+                                fail("không đọc được ảnh")
+                            } else {
+                                iv.setImageBitmap(bmp)
+                                ready = true
+                                status = "đang phát"
+                                animateIn(iv)
+                                if (started) armTimers(m)
+                            }
                         }
                     }
-                }
-            }.start()
+                }.start()
+            }
         }
+    }
+
+    /** Nạp trước video kế tiếp (nếu có) vào trình phát dự phòng để chuyển không đứt. */
+    private fun preloadNext() {
+        val n = seq.peekNext() ?: return
+        if (n == idx || items[n].kind != "video") return
+        if (spare != null && spareIdx == n) return
+        try {
+            if (spare == null) spare = newPlayer()
+            val sp = spare!!
+            sp.setMediaItem(mediaItemOf(items[n]))
+            sp.playWhenReady = false
+            sp.prepare()
+            spareIdx = n
+        } catch (_: Exception) { spareIdx = -1 }
+    }
+
+    private fun renderText(m: ZMedia) {
+        val st = m.style
+        fun sv(k: String): String = if (st == null || st.isNull(k)) "" else st.optString(k, "")
+        val bg = LayoutParser.argb(sv("background"), Color.TRANSPARENT)
+        tvBox.setBackgroundColor(if (bg == Color.TRANSPARENT && sv("background").isEmpty()) Color.BLACK else bg)
+        tv.setTextColor(LayoutParser.argb(sv("color"), Color.WHITE))
+        val fs = st?.optDouble("font_size", 0.0)?.takeIf { !it.isNaN() && it > 0 } ?: 28.0
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, (fs * scale).toFloat().coerceAtLeast(12f))
+        val horiz = when (sv("align")) { "left" -> Gravity.START; "right" -> Gravity.END; else -> Gravity.CENTER_HORIZONTAL }
+        val vert = when (sv("valign")) { "top" -> Gravity.TOP; "bottom" -> Gravity.BOTTOM; else -> Gravity.CENTER_VERTICAL }
+        tv.gravity = horiz or vert
+        var style = Typeface.NORMAL
+        if (st?.optBoolean("bold", false) == true) style = style or Typeface.BOLD
+        if (st?.optBoolean("italic", false) == true) style = style or Typeface.ITALIC
+        tv.setTypeface(Typeface.DEFAULT, style)
+        tv.paintFlags = if (st?.optBoolean("underline", false) == true) tv.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG else tv.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
+        val pad = (16 * scale).toInt()
+        tv.setPadding(pad, pad, pad, pad)
+        tv.text = if (m.rich.isNotBlank()) androidx.core.text.HtmlCompat.fromHtml(m.rich, androidx.core.text.HtmlCompat.FROM_HTML_MODE_COMPACT) else m.textContent
     }
 
     private fun animateIn(v: View?) {
@@ -246,10 +405,25 @@ class MediaZone(
         null
     }
 
-    /** Dòng gỡ lỗi: vùng, tệp đang phát, vị trí trong danh sách, trạng thái. */
+    /** Ảnh từ link https ngoài (mục `delivery:"external"`/`stream`): tải về bộ nhớ, tối đa 8 MB. */
+    private fun fetch(url: String): Bitmap? = try {
+        val req = okhttp3.Request.Builder().url(url).build()
+        PlaylistIo.http.newCall(req).execute().use { r ->
+            if (!r.isSuccessful) null
+            else {
+                val b = r.body?.bytes()
+                if (b == null || b.size > 8 * 1024 * 1024) null else BitmapFactory.decodeByteArray(b, 0, b.size)
+            }
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    /** Dòng gỡ lỗi: vùng, mục đang phát, vị trí trong danh sách, trạng thái. */
     fun stateLine(): String {
         val m = items.getOrNull(idx)
-        return zone.id + ":" + (m?.creativeId?.takeLast(6) ?: "-") + " " + (idx + 1) + "/" + items.size + " " + status + if (audio) " (tiếng)" else ""
+        val tag = if (m == null) "-" else if (m.creativeId.isNotEmpty()) m.creativeId.takeLast(6) else m.kind
+        return zone.id + ":" + tag + " " + (idx + 1) + "/" + items.size + " " + status + if (audio) " (tiếng)" else ""
     }
 
     fun release() {
@@ -258,9 +432,12 @@ class MediaZone(
         released = true
         gen++
         h.removeCallbacksAndMessages(null)
-        gainCb?.let { PlayerGain.unlisten(it) }
+        for (c in gainCbs) PlayerGain.unlisten(c)
+        gainCbs.clear()
         try { player?.release() } catch (_: Exception) {}
+        try { spare?.release() } catch (_: Exception) {}
         player = null
+        spare = null
         pv?.player = null
         iv.setImageDrawable(null)
     }
@@ -547,9 +724,9 @@ class ZoneRenderer(
         for (z in layout.zones) {
             if (z.hidden) continue
             val v: View = when (z.type) {
-                "video", "image" -> {
+                "video", "image", "playlist" -> {
                     val list = item.zoneMedia[z.id].orEmpty()
-                    val mz = MediaZone(ctx, z, list, z.id == audioZone, events)
+                    val mz = MediaZone(ctx, z, list, z.id == audioZone, events, item.campaignId)
                     media.add(mz)
                     mz
                 }

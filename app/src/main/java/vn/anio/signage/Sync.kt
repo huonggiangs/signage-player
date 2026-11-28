@@ -49,11 +49,26 @@ class Sync(
     private val amsDir = File(ctx.cacheDir, "ams")
     private val manifestFile = File(ctx.filesDir, "manifest.json")
     private val eventsFile = File(ctx.filesDir, "events.jsonl")
-    private var lastFlush = System.currentTimeMillis()
+    private val queue = EventQueue(object : TextStore {
+        private val f = File(ctx.filesDir, "event-queue.json")
+        override fun read(): String? = try { if (f.exists()) f.readText() else null } catch (_: Exception) { null }
+        override fun write(text: String) {
+            val t = File(ctx.filesDir, "event-queue.json.tmp")
+            t.writeText(text)
+            if (!t.renameTo(f)) { f.writeText(text); t.delete() }
+        }
+    })
+    private val uploader = EventUploader(
+        queue,
+        { arr -> val r = gw.postEvents(arr); SendResult(r.code, r.errCode(), r.retryAfter) },
+        { prefs.clockOffset * 1000 },
+        { System.currentTimeMillis() }
+    )
     private val isoFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
 
     fun start() {
         io.execute { safe { loadCachedManifest() } }
+        safe { importLegacyEvents() }
         net.scheduleWithFixedDelay({ safe { healthTick() } }, 3, 15, TimeUnit.SECONDS)
         net.schedule(Runnable { hbTick() }, 5, TimeUnit.SECONDS)
         rtExec.execute { realtimeLoop() }
@@ -270,38 +285,45 @@ class Sync(
     fun recordPlay(item: Item, playedMs: Long) = recordPlayId(item.creativeId, playedMs)
 
     /** Ghi proof_of_play cho một creative (chương trình đa vùng ghi theo từng tệp của từng vùng). */
-    @Synchronized
     fun recordPlayId(creativeId: String, playedMs: Long) {
         if (creativeId.isEmpty() || playedMs <= 0) return
         val now = System.currentTimeMillis()
-        val o = JSONObject()
-            .put("type", "proof_of_play")
-            .put("event_id", Uuid7.gen(now + prefs.clockOffset * 1000))
-            .put("ts", isoFmt.format(Date(now + prefs.clockOffset * 1000)))
-            .put("creative_id", creativeId)
-            .put("duration_ms", playedMs.coerceIn(0L, 3_600_000L))
-        try { eventsFile.appendText(o.toString() + "\n") } catch (_: Exception) {}
+        // giờ máy; giờ gửi = giờ máy + độ lệch MỚI NHẤT lúc gửi (lệch đồng hồ không làm mất sự kiện)
+        queue.add(EventQueue.proofOfPlay(Uuid7.gen(now + prefs.clockOffset * 1000), creativeId, playedMs, now), now)
     }
 
-    @Synchronized
-    private fun flushEvents(force: Boolean) {
-        if (!prefs.isSel(Src.AMS) || prefs.deviceId.isEmpty() || !eventsFile.exists()) return
-        val lines = eventsFile.readLines().filter { it.isNotBlank() }
-        if (lines.isEmpty()) return
+    /** Một mục danh sách phát đã hiển thị ổn định: ghi item_impression (log_id UUIDv7 khử trùng), bền trên máy. */
+    fun recordItem(programId: String, zoneId: String, m: ZMedia) {
+        if (programId.isEmpty() || zoneId.isEmpty() || m.itemId.isEmpty()) return
         val now = System.currentTimeMillis()
-        if (!force && lines.size < 20 && now - lastFlush < 300_000) return
-        val batch = lines.take(50)
-        val arr = JSONArray()
-        for (l in batch) {
-            try { arr.put(JSONObject(l)) } catch (_: Exception) {}
-        }
-        val r = gw.postEvents(arr)
-        lastFlush = now
-        if (r.ok || (r.code in 400..499 && r.code != 429)) {
-            if (!r.ok) Logger.log("events bị từ chối ${r.code} ${r.errCode()}, bỏ lô")
-            val rest = lines.drop(batch.size)
-            eventsFile.writeText(if (rest.isEmpty()) "" else rest.joinToString("\n") + "\n")
-        }
+        val logId = Uuid7.gen(now + prefs.clockOffset * 1000)
+        queue.add(EventQueue.itemImpression(logId, programId, zoneId, m.itemId, m.creativeId, m.kind, now), now)
+        // đủ 50 bản ghi thì gửi ngay, không đợi nhịp 60 giây
+        if (queue.shouldFlush(now)) try { net.execute { safe { flushEvents(false) } } } catch (_: Exception) {}
+    }
+
+    /** Gửi hàng đợi (proof_of_play + item_impression) lên /v1/events: mỗi 5 phút hoặc đủ 50 bản ghi; chỉ xóa khi máy chủ trả 2xx. */
+    private fun flushEvents(force: Boolean) {
+        if (!prefs.isSel(Src.AMS) || prefs.deviceId.isEmpty()) return
+        uploader.flush(force)
+    }
+
+    private fun importLegacyEvents() {
+        // 1.1.4 ghi proof_of_play vào events.jsonl: nhập sang hàng đợi mới rồi xóa tệp, không mất dữ liệu khi nâng cấp
+        if (!eventsFile.exists()) return
+        try {
+            val now = System.currentTimeMillis()
+            for (l in eventsFile.readLines()) {
+                if (l.isBlank()) continue
+                val o = try { JSONObject(l) } catch (_: Exception) { continue }
+                val id = o.optString("event_id", "")
+                var ts = now
+                try { isoFmt.parse(o.optString("ts", ""))?.let { ts = it.time } } catch (_: Exception) {}
+                o.remove("ts")
+                queue.add(QEvent(id, "proof_of_play", ts - prefs.clockOffset * 1000, o), now)
+            }
+            eventsFile.delete()
+        } catch (_: Exception) {}
     }
 
     /** Gửi nhật ký thiết bị lên AMS (/v1/logs, <=8 KB) mỗi 10 phút để debug từ web; chỉ khi bật chế độ gỡ lỗi. */

@@ -15,8 +15,22 @@ data class ZMedia(
     val isVideo: Boolean,
     val path: String,
     val durationMs: Long,
-    val fit: Boolean
-)
+    val fit: Boolean,
+    /** mục danh sách phát (trống = suy từ vùng cũ) */
+    val itemId: String = "",
+    /** video | image | text */
+    val kind: String = if (isVideo) "video" else "image",
+    /** link phát trực tiếp (stream/external); trống = tệp đã tải ở [path] */
+    val remoteUrl: String = "",
+    val stream: String = "",
+    val textContent: String = "",
+    val rich: String = "",
+    val style: JSONObject? = null,
+    /** video: cắt sau từng ấy ms; null = phát hết tệp */
+    val cutMs: Long? = null
+) {
+    val isText: Boolean get() = kind == "text"
+}
 
 data class Zone(
     val id: String,
@@ -43,9 +57,11 @@ data class Zone(
     val lon: Double?,
     val label: String,
     val creativeIds: List<String>,
-    val hidden: Boolean
+    val hidden: Boolean,
+    val playlist: List<PItem> = emptyList(),
+    val loop: Boolean = true
 ) {
-    val isMedia: Boolean get() = type == "video" || type == "image"
+    val isMedia: Boolean get() = type == "video" || type == "image" || type == "playlist"
     val area: Double get() = w * h
 
     // data class dùng equals của JSONObject (so sánh tham chiếu) nên đưa vietqr vào equals bằng chuỗi
@@ -55,7 +71,8 @@ data class Zone(
             textColor == other.textColor && fontSize == other.fontSize && scrollSpeed == other.scrollSpeed &&
             url == other.url && qrKind == other.qrKind && qrMode == other.qrMode && qrValue == other.qrValue &&
             vietqr?.toString() == other.vietqr?.toString() && weatherMode == other.weatherMode && lat == other.lat &&
-            lon == other.lon && label == other.label && creativeIds == other.creativeIds && hidden == other.hidden
+            lon == other.lon && label == other.label && creativeIds == other.creativeIds && hidden == other.hidden &&
+            playlist == other.playlist && loop == other.loop
 
     override fun hashCode(): Int = id.hashCode() * 31 + type.hashCode() + creativeIds.hashCode()
 }
@@ -68,7 +85,7 @@ class Layout(val orientation: String, val zones: List<Zone>) {
 }
 
 object LayoutParser {
-    private val TYPES = setOf("video", "image", "marquee", "text", "clock", "weather", "qr")
+    private val TYPES = setOf("video", "image", "playlist", "marquee", "text", "clock", "weather", "qr")
 
     private fun JSONObject.num(name: String, def: Double): Double =
         if (isNull(name) || !has(name)) def else optDouble(name, def).let { if (it.isNaN()) def else it }
@@ -116,7 +133,9 @@ object LayoutParser {
                     lon = wt?.optD("lon"),
                     label = wt?.s("label") ?: "",
                     creativeIds = ids,
-                    hidden = j.optBoolean("hidden", false)
+                    hidden = j.optBoolean("hidden", false),
+                    playlist = Playlists.parse(j.optJSONArray("playlist")),
+                    loop = j.optBoolean("loop", true)
                 )
             )
         }
@@ -126,16 +145,36 @@ object LayoutParser {
         return Layout(if (o.s("orientation") == "portrait") "portrait" else "landscape", sorted)
     }
 
-    /** Tệp theo vùng media (chỉ vùng có tệp tải được); null nếu bố cục có vùng media nhưng không vùng nào có tệp. */
+    /**
+     * Mục phát theo vùng media. Vùng có `playlist` (AMS mới) phát đúng danh sách đó (video/ảnh tệp đã tải, link phát trực tiếp, chữ);
+     * vùng cũ (chỉ `creative_ids`) đọc thành danh sách với id dẫn xuất ổn định. Mục có tệp chưa tải được bị bỏ.
+     * null nếu bố cục có vùng media nhưng không vùng nào có mục phát.
+     */
     fun zoneMedia(layout: Layout, media: Map<String, ZMedia>): Map<String, List<ZMedia>>? {
         val zm = HashMap<String, List<ZMedia>>()
         for (z in layout.zones) {
             if (!z.isMedia || z.hidden) continue
-            val l = z.creativeIds.mapNotNull { media[it] }
+            val l = if (z.playlist.isNotEmpty()) z.playlist.mapNotNull { fromItem(it, media) }
+            else z.creativeIds.mapNotNull { cid -> media[cid]?.copy(itemId = Playlists.legacyItemId(z.id, cid)) }
             if (l.isNotEmpty()) zm[z.id] = l
         }
         if (layout.zones.any { it.isMedia && !it.hidden } && zm.isEmpty()) return null
         return zm
+    }
+
+    private fun fromItem(it: PItem, media: Map<String, ZMedia>): ZMedia? {
+        if (it.isText) {
+            return ZMedia(it.mediaId, false, "", Playlists.staticMs(it.playS), true, it.id, "text", "", "", it.textContent, it.rich, it.style, null)
+        }
+        val cut = if (it.isVideo) it.playS?.let { s -> (s * 1000).toLong() } else null
+        if (it.isRemote || (it.mediaId.isEmpty() && it.url.isNotEmpty())) {
+            if (it.url.isEmpty()) return null
+            val dur = if (it.isVideo) (cut ?: 30_000L) else Playlists.staticMs(it.playS)
+            return ZMedia(it.mediaId, it.isVideo, "", dur, true, it.id, it.type, it.url, Playlists.streamKindOf(it.url), "", "", null, cut)
+        }
+        val m = media[it.mediaId] ?: return null
+        val dur = if (it.isVideo) (cut ?: m.durationMs) else Playlists.staticMs(it.playS)
+        return m.copy(itemId = it.id, isVideo = it.isVideo, kind = it.type, durationMs = dur, cutMs = cut)
     }
 
     /** Chọn vùng video được bật tiếng: vùng media có video, diện tích lớn nhất (ngang bằng thì z cao hơn). */

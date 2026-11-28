@@ -14,7 +14,7 @@ import org.json.JSONObject
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-const val APP_VERSION = "1.1.4"
+const val APP_VERSION = "1.1.5"
 
 /** org.json trả chuỗi "null" khi giá trị là null; hàm này trả mặc định. */
 fun JSONObject.s(name: String, def: String = ""): String = if (isNull(name)) def else optString(name, def)
@@ -167,7 +167,7 @@ object Logger {
 
     @Synchronized
     fun log(level: String, tag: String, msg: String) {
-        try { android.util.Log.println(if (level == "error") 6 else if (level == "warn") 5 else 4, "Signage", "[$tag] $msg") } catch (_: Throwable) {}
+        try { android.util.Log.println(if (level == "error") 6 else if (level == "warn") 5 else 4, "DPlay", "[$tag] $msg") } catch (_: Throwable) {}
         try {
             // hàng đợi gửi lên AMS (/v1/logs): tối đa 300 dòng chưa gửi
             val o = JSONObject().put("ts", iso.format(Date())).put("level", level).put("tag", tag.take(32)).put("msg", msg.take(500))

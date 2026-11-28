@@ -1,4 +1,4 @@
-name: Build Signage Player APK
+name: Build D Play APK
 
 on:
   push:
@@ -57,4 +57,4 @@ jobs:
         run: |
           gh release delete debug-latest --yes --cleanup-tag || true
           gh release create debug-latest signage-player-debug.apk --prerelease \
-            --title "Signage Player debug" --notes "Build ${{ github.sha }}"
+            --title "D Play debug (vn.anio.signage)" --notes "Build ${{ github.sha }}"

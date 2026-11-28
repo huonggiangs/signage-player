@@ -1,11 +1,11 @@
-# Yêu cầu bổ sung trên AMS cho Signage Player (thang máy 9:16)
+# Yêu cầu bổ sung trên AMS cho D Play (thang máy 9:16)
 
 Gửi: nhóm AMS (ams.anio.vn, gw-ams.anio.vn). Ngày: 2026-11-20.
 Căn cứ: `docs/DEVICE-PROTOCOL.md` và `docs/openapi/ams-device-gateway.yaml` trong repo AMS-shorf.
 
 ## 1. App đã làm theo giao thức hiện có (không cần AMS đổi)
 
-Signage Player (`vn.anio.signage`) tự kết nối, không cần người nhập gì trên màn hình:
+D Play (`vn.anio.signage`) tự kết nối, không cần người nhập gì trên màn hình:
 
 1. Lần đầu sinh khóa Ed25519, gọi `POST /v1/register` với `kind=elevator`, `model`, `os`, `app_version`.
 2. Ký mọi yêu cầu `/v1/*` (X-Device-Id, X-Timestamp, X-Nonce, X-Signature), tự bù lệch đồng hồ khi gặp `stale_timestamp`.

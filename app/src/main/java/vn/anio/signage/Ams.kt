@@ -255,14 +255,36 @@ object ManifestBuilder {
         val etag = root.s("etag")
         val media = HashMap<String, ZMedia>()
         for (slot in slots) {
-            val ids = slot.optJSONArray("creative_ids") ?: continue
+            val idList = LinkedHashSet<String>()
+            slot.optJSONArray("creative_ids")?.let { a -> for (k in 0 until a.length()) a.optString(k).takeIf { it.isNotEmpty() }?.let { idList.add(it) } }
+            // vùng có playlist: tệp media của từng mục cũng phải có mặt (thường đã nằm trong creative_ids)
+            slot.optJSONObject("layout")?.optJSONArray("zones")?.let { za ->
+                for (zi in 0 until za.length()) {
+                    val pl = za.optJSONObject(zi)?.optJSONArray("playlist") ?: continue
+                    for (pi in 0 until pl.length()) pl.optJSONObject(pi)?.s("media_id")?.takeIf { it.isNotEmpty() && it in creatives }?.let { idList.add(it) }
+                }
+            }
             val part = ArrayList<Item>()
-            for (k in 0 until ids.length()) {
-                val cid = ids.optString(k)
+            for (cid in idList) {
                 val c = creatives[cid] ?: continue
                 val url = c.s("url")
                 if (url.isEmpty()) continue
                 val isVideo = c.s("media_type", "video") == "video"
+                val streamed = c.s("delivery") == "stream"
+                if (streamed) {
+                    // link đã duyệt: phát trực tiếp, không tải, không sha256
+                    val sdur = (c.optDouble("duration_s", 10.0) * 1000).toLong().coerceAtLeast(1000)
+                    media[cid] = ZMedia(cid, isVideo, "", sdur, c.s("fit") == "fit", "", if (isVideo) "video" else "image", url, c.s("kind"))
+                    part.add(
+                        Item(
+                            id = slot.s("slot_id") + ":" + cid, isVideo = isVideo, uri = Uri.parse(url), durationMs = sdur,
+                            header = slot.s("header", gh), footer = slot.s("footer", gf), fit = c.s("fit") == "fit", startAt = 0, endAt = 0,
+                            creativeId = cid, campaignId = c.s("campaign_id", slot.s("campaign_id")), slotId = slot.s("slot_id"),
+                            dayStartMin = slot.optInt("start_min", 0), dayEndMin = slot.optInt("end_min", 1440), manifestEtag = etag
+                        )
+                    )
+                    continue
+                }
                 if (!files.containsKey(cid)) {
                     val ext = url.substringBefore('?').substringAfterLast('.', if (isVideo) "mp4" else "jpg").take(5)
                     val dest = File(dir, cid.replace(Regex("[^A-Za-z0-9_-]"), "_") + "." + ext)
